@@ -82,7 +82,7 @@ type Config struct {
 // Dialer implements the proxy.Dialer interface by dialing domain-fronted
 // servers.
 type Dialer struct {
-	cfg             *Config
+	*Config
 	masquerades     *verifiedMasqueradeSet
 	connPool        *connpool.Pool
 	enproxyConfig   *enproxy.Config
@@ -93,10 +93,10 @@ type Dialer struct {
 // NewDialer creates a new Dialer for the given Config.
 func NewDialer(cfg *Config) *Dialer {
 	d := &Dialer{
-		cfg:        cfg,
+		Config:     cfg,
 		tlsConfigs: make(map[string]*tls.Config),
 	}
-	if d.cfg.Masquerades != nil {
+	if d.Masquerades != nil {
 		d.masquerades = d.verifiedMasquerades()
 	}
 	d.connPool = &connpool.Pool{
@@ -170,11 +170,11 @@ func (d *Dialer) enproxyConfigWith(dialProxy func(addr string) (net.Conn, error)
 		NewRequest: func(upstreamHost string, method string, body io.Reader) (req *http.Request, err error) {
 			if upstreamHost == "" {
 				// No specific host requested, use configured one
-				upstreamHost = d.cfg.Host
+				upstreamHost = d.Host
 			}
 			return http.NewRequest(method, "http://"+upstreamHost+"/", body)
 		},
-		BufferRequests: d.cfg.BufferRequests,
+		BufferRequests: d.BufferRequests,
 		IdleTimeout:    idleTimeout, // TODO: make this configurable
 	}
 }
@@ -188,7 +188,7 @@ func (d *Dialer) dialServer() (net.Conn, error) {
 }
 
 func (d *Dialer) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
-	dialTimeout := time.Duration(d.cfg.DialTimeoutMillis) * time.Millisecond
+	dialTimeout := time.Duration(d.DialTimeoutMillis) * time.Millisecond
 	if dialTimeout == 0 {
 		dialTimeout = 20 * time.Second
 	}
@@ -209,7 +209,7 @@ func (d *Dialer) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
 		sendServerNameExtension,
 		d.tlsConfig(masquerade))
 
-	if d.cfg.OnDialStats != nil {
+	if d.OnDialStats != nil {
 		domain := ""
 		if masquerade != nil {
 			domain = masquerade.Domain
@@ -220,7 +220,7 @@ func (d *Dialer) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
 			resultAddr = cwt.Conn.RemoteAddr().String()
 		}
 
-		d.cfg.OnDialStats(err == nil, domain, resultAddr, cwt.ResolutionTime, cwt.ConnectTime, cwt.HandshakeTime)
+		d.OnDialStats(err == nil, domain, resultAddr, cwt.ResolutionTime, cwt.ConnectTime, cwt.HandshakeTime)
 	}
 
 	if err != nil && masquerade != nil {
@@ -231,11 +231,11 @@ func (d *Dialer) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
 
 // Get the address to dial for reaching the server
 func (d *Dialer) addressForServer(masquerade *Masquerade) string {
-	return fmt.Sprintf("%s:%d", d.serverHost(masquerade), d.cfg.Port)
+	return fmt.Sprintf("%s:%d", d.serverHost(masquerade), d.Port)
 }
 
 func (d *Dialer) serverHost(masquerade *Masquerade) string {
-	serverHost := d.cfg.Host
+	serverHost := d.Host
 	if masquerade != nil {
 		if masquerade.IpAddress != "" {
 			serverHost = masquerade.IpAddress
@@ -253,7 +253,7 @@ func (d *Dialer) tlsConfig(masquerade *Masquerade) *tls.Config {
 	d.tlsConfigsMutex.Lock()
 	defer d.tlsConfigsMutex.Unlock()
 
-	serverName := d.cfg.Host
+	serverName := d.Host
 	if masquerade != nil {
 		serverName = masquerade.Domain
 	}
@@ -261,9 +261,9 @@ func (d *Dialer) tlsConfig(masquerade *Masquerade) *tls.Config {
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{
 			ClientSessionCache: tls.NewLRUClientSessionCache(1000),
-			InsecureSkipVerify: d.cfg.InsecureSkipVerify,
+			InsecureSkipVerify: d.InsecureSkipVerify,
 			ServerName:         serverName,
-			RootCAs:            d.cfg.RootCAs,
+			RootCAs:            d.RootCAs,
 		}
 		d.tlsConfigs[serverName] = tlsConfig
 	}

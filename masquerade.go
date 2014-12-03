@@ -54,7 +54,7 @@ func (vms *verifiedMasqueradeSet) nextVerified() *Masquerade {
 func (d *Dialer) verifiedMasquerades() *verifiedMasqueradeSet {
 	// Size verifiedChSize to be able to hold the smaller of MaxMasquerades or
 	// the number of configured masquerades.
-	verifiedChSize := len(d.cfg.Masquerades)
+	verifiedChSize := len(d.Masquerades)
 	if MaxMasquerades < verifiedChSize {
 		verifiedChSize = MaxMasquerades
 	}
@@ -80,8 +80,8 @@ func (d *Dialer) verifiedMasquerades() *verifiedMasqueradeSet {
 // feedCandidates feeds the candidate masquerades to our worker routines in
 // random order
 func (vms *verifiedMasqueradeSet) feedCandidates() {
-	for _, i := range rand.Perm(len(vms.dialer.cfg.Masquerades)) {
-		if !vms.feedCandidate(vms.dialer.cfg.Masquerades[i]) {
+	for _, i := range rand.Perm(len(vms.dialer.Masquerades)) {
+		if !vms.feedCandidate(vms.dialer.Masquerades[i]) {
 			break
 		}
 	}
