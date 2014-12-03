@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/getlantern/enproxy"
-	// "github.com/getlantern/flashlight/statreporter"
-	"github.com/getlantern/flashlight/statserver"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/keyman"
 )
@@ -24,7 +22,7 @@ var (
 	TEN_YEARS_FROM_TODAY = time.Now().AddDate(10, 0, 0)
 
 	// Default TLS configuration for servers
-	DEFAULT_TLS_SERVER_CONFIG = &tls.Config{
+	defaultTlsServerConfig = &tls.Config{
 		// The ECDHE cipher suites are preferred for performance and forward
 		// secrecy.  See https://community.qualys.com/blogs/securitylabs/2013/06/25/ssl-labs-deploying-forward-secrecy.
 		PreferServerCipherSuites: true,
@@ -53,12 +51,27 @@ type Server struct {
 	// WriteTimeout: (optional) timeout for write ops
 	WriteTimeout time.Duration
 
+	// CertContext for server's certificates
+	CertContext *CertContext
+
+	// TLSConfig: tls configuration to use on inbound connections. If nil, will
+	// use some sensible defaults.
 	TLSConfig *tls.Config
 
-	Host                       string             // FQDN that is guaranteed to hit this server
-	CertContext                *CertContext       // context for certificate management
-	AllowNonGlobalDestinations bool               // if true, requests to LAN, Loopback, etc. will be allowed
-	StatServer                 *statserver.Server // optional server of stats
+	// Host: FQDN that is guaranteed to hit this server
+	Host string
+
+	// AllowNonGlobalDestinations: if false, requests to LAN, Loopback, etc.
+	// will be disallowed.
+	AllowNonGlobalDestinations bool
+
+	// OnBytesSent: optional callback for learning about bytes sent by this
+	// server to upstream destinations.
+	OnBytesSent func(ip string, bytes int64)
+
+	// OnBytesSent: optional callback for learning about bytes received by this
+	// server from upstream destinations.
+	OnBytesReceived func(ip string, bytes int64)
 }
 
 // CertContext encapsulates the certificates used by a Server
@@ -77,7 +90,7 @@ func (server *Server) Listen() (net.Listener, error) {
 
 	tlsConfig := server.TLSConfig
 	if server.TLSConfig == nil {
-		tlsConfig = DEFAULT_TLS_SERVER_CONFIG
+		tlsConfig = defaultTlsServerConfig
 	}
 	cert, err := tls.LoadX509KeyPair(server.CertContext.ServerCertFile, server.CertContext.PKFile)
 	if err != nil {
@@ -96,32 +109,17 @@ func (server *Server) Listen() (net.Listener, error) {
 }
 
 func (server *Server) Serve(l net.Listener) error {
-	// Set up an enproxy Proxy
-	proxy := &enproxy.Proxy{
-		Dial: server.dialDestination,
-		Host: server.Host,
-	}
-
 	if server.Host != "" {
 		log.Debugf("Running as host %s", server.Host)
 	}
 
-	// Hook into stats reporting if necessary
-	// servingStats := server.startServingStatsIfNecessary()
-
-	// // Add callbacks to track bytes given
-	// proxy.OnBytesReceived = func(ip string, bytes int64) {
-	// 	statreporter.OnBytesGiven(ip, bytes)
-	// 	if servingStats {
-	// 		server.StatServer.OnBytesReceived(ip, bytes)
-	// 	}
-	// }
-	// proxy.OnBytesSent = func(ip string, bytes int64) {
-	// 	statreporter.OnBytesGiven(ip, bytes)
-	// 	if servingStats {
-	// 		server.StatServer.OnBytesSent(ip, bytes)
-	// 	}
-	// }
+	// Set up an enproxy Proxy
+	proxy := &enproxy.Proxy{
+		Dial:            server.dialDestination,
+		Host:            server.Host,
+		OnBytesReceived: server.OnBytesReceived,
+		OnBytesSent:     server.OnBytesSent,
+	}
 
 	proxy.Start()
 
@@ -183,15 +181,4 @@ func (ctx *CertContext) InitServerCert(host string) (err error) {
 		return
 	}
 	return nil
-}
-
-func (server *Server) startServingStatsIfNecessary() bool {
-	if server.StatServer != nil {
-		log.Debugf("Serving stats at address: %s", server.StatServer.Addr)
-		go server.StatServer.ListenAndServe()
-		return true
-	} else {
-		log.Debug("Not serving stats (no statsaddr specified)")
-		return false
-	}
 }
