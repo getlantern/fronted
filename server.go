@@ -69,7 +69,28 @@ type CertContext struct {
 	ServerCert     *keyman.Certificate
 }
 
-func (server *Server) ListenAndServe() error {
+func (server *Server) Listen() (net.Listener, error) {
+	tlsConfig := server.TLSConfig
+	if server.TLSConfig == nil {
+		tlsConfig = DEFAULT_TLS_SERVER_CONFIG
+	}
+	cert, err := tls.LoadX509KeyPair(server.CertContext.ServerCertFile, server.CertContext.PKFile)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to load certificate and key from %s and %s: %s", server.CertContext.ServerCertFile, server.CertContext.PKFile, err)
+	}
+	tlsConfig.Certificates = []tls.Certificate{cert}
+
+	listener, err := tls.Listen("tcp", server.Addr, tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to listen for tls connections at %s: %s", server.Addr, err)
+	}
+
+	// We use an idle timing listener to time out idle HTTP connections, since
+	// the CDNs seem to like keeping lots of connections open indefinitely.
+	return idletiming.Listener(listener, httpIdleTimeout, nil), nil
+}
+
+func (server *Server) Serve(l net.Listener) error {
 	err := server.CertContext.InitServerCert(strings.Split(server.Addr, ":")[0])
 	if err != nil {
 		return fmt.Errorf("Unable to init server cert: %s", err)
@@ -112,25 +133,7 @@ func (server *Server) ListenAndServe() error {
 
 	log.Debugf("About to start server (https) proxy at %s", server.Addr)
 
-	tlsConfig := server.TLSConfig
-	if server.TLSConfig == nil {
-		tlsConfig = DEFAULT_TLS_SERVER_CONFIG
-	}
-	cert, err := tls.LoadX509KeyPair(server.CertContext.ServerCertFile, server.CertContext.PKFile)
-	if err != nil {
-		return fmt.Errorf("Unable to load certificate and key from %s and %s: %s", server.CertContext.ServerCertFile, server.CertContext.PKFile, err)
-	}
-	tlsConfig.Certificates = []tls.Certificate{cert}
-
-	listener, err := tls.Listen("tcp", server.Addr, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("Unable to listen for tls connections at %s: %s", server.Addr, err)
-	}
-
-	// We use an idle timing listener to time out idle HTTP connections, since
-	// the CDNs seem to like keeping lots of connections open indefinitely.
-	idleTimingListener := idletiming.Listener(listener, httpIdleTimeout, nil)
-	return httpServer.Serve(idleTimingListener)
+	return httpServer.Serve(l)
 }
 
 // dialDestination dials the destination server and wraps the resulting net.Conn

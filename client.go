@@ -89,11 +89,14 @@ type Client struct {
 	tlsConfigsMutex sync.Mutex
 }
 
-func (client *Client) NewClient(cfg *ClientConfig) *Client {
-	client = &Client{
-		cfg:         cfg,
-		masquerades: client.verifiedMasquerades(),
-		tlsConfigs:  make(map[string]*tls.Config),
+// NewClient creates a new client for the given ClientConfig.
+func NewClient(cfg *ClientConfig) *Client {
+	client := &Client{
+		cfg:        cfg,
+		tlsConfigs: make(map[string]*tls.Config),
+	}
+	if client.cfg.Masquerades != nil {
+		client.masquerades = client.verifiedMasquerades()
 	}
 	client.connPool = &connpool.Pool{
 		MinSize:      30,
@@ -123,6 +126,8 @@ func (client *Client) Dial(network, addr string) (net.Conn, error) {
 	return conn, nil
 }
 
+// Close closes the cilent, in particular closing the underlying connection
+// pool.
 func (client *Client) Close() {
 	if client.connPool != nil {
 		// We stop the connPool on a goroutine so as not to wait for Stop to finish
@@ -170,7 +175,11 @@ func (client *Client) enproxyConfigWith(dialProxy func() (net.Conn, error)) *enp
 }
 
 func (client *Client) dialServer() (net.Conn, error) {
-	return client.dialServerWith(client.masquerades.nextVerified())
+	var masquerade *Masquerade
+	if client.masquerades != nil {
+		masquerade = client.masquerades.nextVerified()
+	}
+	return client.dialServerWith(masquerade)
 }
 
 func (client *Client) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
@@ -247,7 +256,7 @@ func (client *Client) tlsConfig(masquerade *Masquerade) *tls.Config {
 	if masquerade != nil {
 		serverName = masquerade.Domain
 	}
-	tlsConfig := client.tlsConfigs[masquerade.Domain]
+	tlsConfig := client.tlsConfigs[serverName]
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{
 			ClientSessionCache: tls.NewLRUClientSessionCache(1000),
@@ -255,7 +264,7 @@ func (client *Client) tlsConfig(masquerade *Masquerade) *tls.Config {
 			ServerName:         serverName,
 			RootCAs:            client.cfg.RootCAs,
 		}
-		client.tlsConfigs[masquerade.Domain] = tlsConfig
+		client.tlsConfigs[serverName] = tlsConfig
 	}
 
 	return tlsConfig
