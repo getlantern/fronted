@@ -68,7 +68,8 @@ func TestIntegration(t *testing.T) {
 				Domain: "100partnerprogramme.de",
 			},
 			&Masquerade{
-				Domain: "10minutemail.com",
+				Domain:    "10minutemail.com",
+				IpAddress: "162.159.250.16",
 			},
 		},
 		RootCAs: rootCAs,

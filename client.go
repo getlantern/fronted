@@ -251,10 +251,6 @@ func (client *Client) tlsConfig(masquerade *Masquerade) *tls.Config {
 	client.tlsConfigsMutex.Lock()
 	defer client.tlsConfigsMutex.Unlock()
 
-	if client.tlsConfigs == nil {
-		client.tlsConfigs = make(map[string]*tls.Config)
-	}
-
 	serverName := client.cfg.Host
 	if masquerade != nil {
 		serverName = masquerade.Domain
