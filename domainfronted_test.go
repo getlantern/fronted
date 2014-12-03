@@ -16,6 +16,31 @@ const (
 	expectedGoogleResponse = "Google is built by a large team of engineers, designers, researchers, robots, and others in many different sites across the globe. It is updated continuously, and built with more tools and technologies than we can shake a stick at. If you'd like to help us out, see google.com/careers.\n"
 )
 
+func TestBadProtocol(t *testing.T) {
+	client := NewClient(&ClientConfig{})
+	_, err := client.Dial("udp", "127.0.0.1:25324")
+	assert.Error(t, err, "Using a non-tcp protocol should have resulted in an error")
+}
+
+func TestBadEnproxyConn(t *testing.T) {
+	client := NewClient(&ClientConfig{
+		Host: "localhost",
+		Port: 3253,
+	})
+	_, err := client.Dial("tcp", "www.google.com")
+	assert.Error(t, err, "Dialing using a non-existent host should have failed")
+}
+
+func TestHttpClientWithBadEnproxyConn(t *testing.T) {
+	client := NewClient(&ClientConfig{
+		Host: "localhost",
+		Port: 3253,
+	})
+	hc := client.HttpClientUsing(nil)
+	_, err := hc.Get("http://www.google.com/humans.txt")
+	assert.Error(t, err, "HttpClient using a non-existent host should have failed")
+}
+
 func TestUnit(t *testing.T) {
 	server := &Server{
 		Addr: "localhost:0",
