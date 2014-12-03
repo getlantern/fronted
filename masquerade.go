@@ -91,21 +91,21 @@ func (vms *verifiedMasqueradeSet) feedCandidates() {
 func (vms *verifiedMasqueradeSet) feedCandidate(candidate *Masquerade) bool {
 	select {
 	case <-vms.stopCh:
-		log.Debug("Received stop, not feeding any further")
+		log.Trace("Received stop, not feeding any further")
 		return false
 	case vms.candidatesCh <- candidate:
-		log.Debug("Fed candidate")
+		log.Trace("Fed candidate")
 		return true
 	}
 }
 
 // stop stops the verification process
 func (vms *verifiedMasqueradeSet) stop() {
-	log.Debug("Stop called")
+	log.Trace("masquerades stop called")
 	vms.stopCh <- nil
-	log.Debug("Waiting for workers to finish")
+	log.Trace("masquerades waiting for workers to finish")
 	vms.wg.Wait()
-	log.Debug("Stopped")
+	log.Trace("masquerades stopped")
 }
 
 // verify checks masquerades obtained from candidatesCh to see if they work on
@@ -147,7 +147,7 @@ func (vms *verifiedMasqueradeSet) doVerify(masquerade *Masquerade) bool {
 				errCh <- fmt.Errorf("HTTP Body Error: %s", body)
 			} else {
 				delta := time.Now().Sub(start)
-				log.Debugf("SUCCESSFUL CHECK FOR: %s IN %s, %s", masquerade.Domain, delta, body)
+				log.Tracef("SUCCESSFUL CHECK FOR: %s IN %s, %s", masquerade.Domain, delta, body)
 				errCh <- nil
 			}
 		}

@@ -133,6 +133,9 @@ func (client *Client) Close() {
 		// We stop the connPool on a goroutine so as not to wait for Stop to finish
 		go client.connPool.Stop()
 	}
+	if client.masquerades != nil {
+		go client.masquerades.stop()
+	}
 }
 
 // HttpClientUsing creates a simple domain-fronted HTTP client using the
