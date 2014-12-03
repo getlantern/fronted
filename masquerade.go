@@ -31,7 +31,7 @@ type MasqueradeSet []*Masquerade
 // verifiedMasqueradeSet verifies each configured Masquerade by attempting to
 // proxy using it.
 type verifiedMasqueradeSet struct {
-	client             *Client
+	dialer             *Dialer
 	candidatesCh       chan *Masquerade
 	stopCh             chan interface{}
 	verifiedCh         chan *Masquerade
@@ -50,16 +50,16 @@ func (vms *verifiedMasqueradeSet) nextVerified() *Masquerade {
 }
 
 // verified sets up a new verifiedMasqueradeSet that verifies each of the
-// Masquerades in this MasqueradeSet for the given client.
-func (client *Client) verifiedMasquerades() *verifiedMasqueradeSet {
+// Masquerades in this MasqueradeSet for the given Dialer.
+func (d *Dialer) verifiedMasquerades() *verifiedMasqueradeSet {
 	// Size verifiedChSize to be able to hold the smaller of MaxMasquerades or
 	// the number of configured masquerades.
-	verifiedChSize := len(client.cfg.Masquerades)
+	verifiedChSize := len(d.cfg.Masquerades)
 	if MaxMasquerades < verifiedChSize {
 		verifiedChSize = MaxMasquerades
 	}
 	vms := &verifiedMasqueradeSet{
-		client:       client,
+		dialer:       d,
 		candidatesCh: make(chan *Masquerade),
 		stopCh:       make(chan interface{}, 1),
 		verifiedCh:   make(chan *Masquerade, verifiedChSize),
@@ -80,8 +80,8 @@ func (client *Client) verifiedMasquerades() *verifiedMasqueradeSet {
 // feedCandidates feeds the candidate masquerades to our worker routines in
 // random order
 func (vms *verifiedMasqueradeSet) feedCandidates() {
-	for _, i := range rand.Perm(len(vms.client.cfg.Masquerades)) {
-		if !vms.feedCandidate(vms.client.cfg.Masquerades[i]) {
+	for _, i := range rand.Perm(len(vms.dialer.cfg.Masquerades)) {
+		if !vms.feedCandidate(vms.dialer.cfg.Masquerades[i]) {
 			break
 		}
 	}
@@ -134,7 +134,7 @@ func (vms *verifiedMasqueradeSet) doVerify(masquerade *Masquerade) bool {
 	}()
 	go func() {
 		start := time.Now()
-		httpClient := vms.client.HttpClientUsing(masquerade)
+		httpClient := vms.dialer.HttpClientUsing(masquerade)
 		req, _ := http.NewRequest("HEAD", "http://www.google.com/humans.txt", nil)
 		resp, err := httpClient.Do(req)
 		if err != nil {

@@ -20,26 +20,26 @@ const (
 )
 
 func TestBadProtocol(t *testing.T) {
-	client := NewClient(&ClientConfig{})
-	_, err := client.Dial("udp", "127.0.0.1:25324")
+	d := NewDialer(&Config{})
+	_, err := d.Dial("udp", "127.0.0.1:25324")
 	assert.Error(t, err, "Using a non-tcp protocol should have resulted in an error")
 }
 
 func TestBadEnproxyConn(t *testing.T) {
-	client := NewClient(&ClientConfig{
+	d := NewDialer(&Config{
 		Host: "localhost",
 		Port: 3253,
 	})
-	_, err := client.Dial("tcp", "www.google.com")
+	_, err := d.Dial("tcp", "www.google.com")
 	assert.Error(t, err, "Dialing using a non-existent host should have failed")
 }
 
 func TestHttpClientWithBadEnproxyConn(t *testing.T) {
-	client := NewClient(&ClientConfig{
+	d := NewDialer(&Config{
 		Host: "localhost",
 		Port: 3253,
 	})
-	hc := client.HttpClientUsing(nil)
+	hc := d.HttpClientUsing(nil)
 	_, err := hc.Get("http://www.google.com/humans.txt")
 	assert.Error(t, err, "HttpClient using a non-existent host should have failed")
 }
@@ -78,8 +78,8 @@ func TestNonGlobalAddressBadAddr(t *testing.T) {
 
 func doTestNonGlobalAddress(t *testing.T, useRealAddress bool) {
 	l := startServer(t, false)
-	client := clientFor(t, l)
-	defer client.Close()
+	d := dialerFor(t, l)
+	defer d.Close()
 
 	gotConn := false
 	var gotConnMutex sync.Mutex
@@ -98,7 +98,7 @@ func doTestNonGlobalAddress(t *testing.T, useRealAddress bool) {
 	if !useRealAddress {
 		addr = "asdflklsdkfjhladskfjhlasdkfjhlsads.asflkjshadlfkadsjhflk:0"
 	}
-	conn, err := client.Dial("tcp", addr)
+	conn, err := d.Dial("tcp", addr)
 	defer conn.Close()
 
 	data := []byte("Some Meaningless Data")
@@ -112,10 +112,10 @@ func doTestNonGlobalAddress(t *testing.T, useRealAddress bool) {
 
 func TestRoundTrip(t *testing.T) {
 	l := startServer(t, true)
-	client := clientFor(t, l)
-	defer client.Close()
+	d := dialerFor(t, l)
+	defer d.Close()
 
-	proxy.Test(t, client)
+	proxy.Test(t, d)
 }
 
 // TestIntegration tests against existing domain-fronted servers running on
@@ -155,7 +155,7 @@ func TestIntegration(t *testing.T) {
 	actualHandshakeTime := time.Duration(0)
 	var statsMutex sync.Mutex
 
-	client := NewClient(&ClientConfig{
+	d := NewDialer(&Config{
 		Host:        "fallbacks.getiantem.org",
 		Port:        443,
 		Masquerades: masquerades,
@@ -172,11 +172,11 @@ func TestIntegration(t *testing.T) {
 			}
 		},
 	})
-	defer client.Close()
+	defer d.Close()
 
 	hc := &http.Client{
 		Transport: &http.Transport{
-			Dial: client.Dial,
+			Dial: d.Dial,
 		},
 	}
 
@@ -222,7 +222,7 @@ func startServer(t *testing.T, allowNonGlobal bool) net.Listener {
 	return l
 }
 
-func clientFor(t *testing.T, l net.Listener) *Client {
+func dialerFor(t *testing.T, l net.Listener) *Dialer {
 	addrParts := strings.Split(l.Addr().String(), ":")
 	host := addrParts[0]
 	port, err := strconv.Atoi(addrParts[1])
@@ -230,7 +230,7 @@ func clientFor(t *testing.T, l net.Listener) *Client {
 		t.Fatalf("Unable to parse port: %s", err)
 	}
 
-	return NewClient(&ClientConfig{
+	return NewDialer(&Config{
 		Host:               host,
 		Port:               port,
 		InsecureSkipVerify: true,
