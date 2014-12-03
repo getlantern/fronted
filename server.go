@@ -70,6 +70,11 @@ type CertContext struct {
 }
 
 func (server *Server) Listen() (net.Listener, error) {
+	err := server.CertContext.InitServerCert(strings.Split(server.Addr, ":")[0])
+	if err != nil {
+		return nil, fmt.Errorf("Unable to init server cert: %s", err)
+	}
+
 	tlsConfig := server.TLSConfig
 	if server.TLSConfig == nil {
 		tlsConfig = DEFAULT_TLS_SERVER_CONFIG
@@ -91,11 +96,6 @@ func (server *Server) Listen() (net.Listener, error) {
 }
 
 func (server *Server) Serve(l net.Listener) error {
-	err := server.CertContext.InitServerCert(strings.Split(server.Addr, ":")[0])
-	if err != nil {
-		return fmt.Errorf("Unable to init server cert: %s", err)
-	}
-
 	// Set up an enproxy Proxy
 	proxy := &enproxy.Proxy{
 		Dial: server.dialDestination,

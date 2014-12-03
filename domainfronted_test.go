@@ -9,18 +9,13 @@ import (
 )
 
 func TestRoundTrip(t *testing.T) {
-	cc := &CertContext{
-		PKFile:         "testpk.pem",
-		ServerCertFile: "testcert.pem",
-	}
-	err := cc.InitServerCert("localhost")
-	if err != nil {
-		t.Fatalf("Unable to initialize certs: %s", err)
-	}
 	server := &Server{
-		Addr:                       "localhost:0",
-		CertContext:                cc,
+		Addr: "localhost:0",
 		AllowNonGlobalDestinations: true,
+		CertContext: &CertContext{
+			PKFile:         "testpk.pem",
+			ServerCertFile: "testcert.pem",
+		},
 	}
 	l, err := server.Listen()
 	if err != nil {
