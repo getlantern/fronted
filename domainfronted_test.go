@@ -69,6 +69,14 @@ func TestBadCertificateFile(t *testing.T) {
 }
 
 func TestNonGlobalAddress(t *testing.T) {
+	doTestNonGlobalAddress(t, true)
+}
+
+func TestNonGlobalAddressBadAddr(t *testing.T) {
+	doTestNonGlobalAddress(t, false)
+}
+
+func doTestNonGlobalAddress(t *testing.T, useRealAddress bool) {
 	l := startServer(t, false)
 	client := clientFor(t, l)
 	defer client.Close()
@@ -86,7 +94,11 @@ func TestNonGlobalAddress(t *testing.T) {
 		gotConnMutex.Unlock()
 	}()
 
-	conn, err := client.Dial("tcp", l.Addr().String())
+	addr := l.Addr().String()
+	if !useRealAddress {
+		addr = "asdflklsdkfjhladskfjhlasdkfjhlsads.asflkjshadlfkadsjhflk:0"
+	}
+	conn, err := client.Dial("tcp", addr)
 	defer conn.Close()
 
 	data := []byte("Some Meaningless Data")
