@@ -41,7 +41,7 @@ func TestHttpClientWithBadEnproxyConn(t *testing.T) {
 	assert.Error(t, err, "HttpClient using a non-existent host should have failed")
 }
 
-func TestUnit(t *testing.T) {
+func TestRoundTrip(t *testing.T) {
 	server := &Server{
 		Addr: "localhost:0",
 		AllowNonGlobalDestinations: true,
@@ -85,19 +85,33 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("Unable to set up cert pool")
 	}
 
-	client := NewClient(&ClientConfig{
-		Host: "fallbacks.getiantem.org",
-		Port: 443,
-		Masquerades: []*Masquerade{
-			&Masquerade{
+	masquerades := make([]*Masquerade, MaxMasquerades*2)
+	for i := 0; i < len(masquerades); i++ {
+		switch i % 3 {
+		case 0:
+			// Good masquerade without IP
+			masquerades[i] = &Masquerade{
 				Domain: "100partnerprogramme.de",
-			},
-			&Masquerade{
+			}
+		case 1:
+			// Good masquerade with IP
+			masquerades[i] = &Masquerade{
 				Domain:    "10minutemail.com",
 				IpAddress: "162.159.250.16",
-			},
-		},
-		RootCAs: rootCAs,
+			}
+		case 2:
+			// Bad masquerade
+			masquerades[i] = &Masquerade{
+				Domain: "103243423minutemail.com",
+			}
+		}
+	}
+
+	client := NewClient(&ClientConfig{
+		Host:        "fallbacks.getiantem.org",
+		Port:        443,
+		Masquerades: masquerades,
+		RootCAs:     rootCAs,
 	})
 	defer client.Close()
 
