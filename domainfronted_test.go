@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/getlantern/keyman"
-	"github.com/getlantern/proxytest"
+	"github.com/getlantern/proxy"
 	"github.com/getlantern/testify/assert"
 )
 
@@ -49,7 +49,7 @@ func TestUnit(t *testing.T) {
 	})
 	defer client.Close()
 
-	proxytest.Go(t, client.Dial)
+	proxy.Test(t, client)
 }
 
 // TestIntegration tests against existing domain-fronted servers running on

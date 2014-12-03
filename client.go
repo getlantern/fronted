@@ -128,7 +128,7 @@ func (client *Client) Dial(network, addr string) (net.Conn, error) {
 
 // Close closes the cilent, in particular closing the underlying connection
 // pool.
-func (client *Client) Close() {
+func (client *Client) Close() error {
 	if client.connPool != nil {
 		// We stop the connPool on a goroutine so as not to wait for Stop to finish
 		go client.connPool.Stop()
@@ -136,6 +136,7 @@ func (client *Client) Close() {
 	if client.masquerades != nil {
 		go client.masquerades.stop()
 	}
+	return nil
 }
 
 // HttpClientUsing creates a simple domain-fronted HTTP client using the
