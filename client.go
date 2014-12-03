@@ -103,7 +103,7 @@ func NewClient(cfg *ClientConfig) *Client {
 		ClaimTimeout: idleTimeout,
 		Dial:         client.dialServer,
 	}
-	client.enproxyConfig = client.enproxyConfigWith(func() (net.Conn, error) {
+	client.enproxyConfig = client.enproxyConfigWith(func(addr string) (net.Conn, error) {
 		return client.connPool.Get()
 	})
 	return client
@@ -138,7 +138,7 @@ func (client *Client) Close() {
 // HttpClientUsing creates a simple domain-fronted HTTP client using the
 // specified Masquerade.
 func (client *Client) HttpClientUsing(masquerade *Masquerade) *http.Client {
-	enproxyConfig := client.enproxyConfigWith(func() (net.Conn, error) {
+	enproxyConfig := client.enproxyConfigWith(func(addr string) (net.Conn, error) {
 		return client.dialServerWith(masquerade)
 	})
 
@@ -159,7 +159,7 @@ func (client *Client) HttpClientUsing(masquerade *Masquerade) *http.Client {
 	}
 }
 
-func (client *Client) enproxyConfigWith(dialProxy func() (net.Conn, error)) *enproxy.Config {
+func (client *Client) enproxyConfigWith(dialProxy func(addr string) (net.Conn, error)) *enproxy.Config {
 	return &enproxy.Config{
 		DialProxy: dialProxy,
 		NewRequest: func(upstreamHost string, method string, body io.Reader) (req *http.Request, err error) {
