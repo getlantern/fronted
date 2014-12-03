@@ -76,7 +76,7 @@ type ClientConfig struct {
 	// OnDialStats is an optional callback that will get called on every dial to
 	// the server to report stats on what was dialed and how long each step
 	// took.
-	OnDialStats func(domain, addr string, resolutionTime, connectTime, handshakeTime time.Duration)
+	OnDialStats func(success bool, domain, addr string, resolutionTime, connectTime, handshakeTime time.Duration)
 }
 
 // Client provides a mechanism for dialing domain-fronted servers.
@@ -219,7 +219,7 @@ func (client *Client) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
 			resultAddr = cwt.Conn.RemoteAddr().String()
 		}
 
-		client.cfg.OnDialStats(domain, resultAddr, cwt.ResolutionTime, cwt.ConnectTime, cwt.HandshakeTime)
+		client.cfg.OnDialStats(err == nil, domain, resultAddr, cwt.ResolutionTime, cwt.ConnectTime, cwt.HandshakeTime)
 	}
 
 	if err != nil && masquerade != nil {

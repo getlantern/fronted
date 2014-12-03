@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/getlantern/keyman"
 	"github.com/getlantern/proxy"
@@ -67,6 +69,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to parse port: %s", err)
 	}
+
 	client := NewClient(&ClientConfig{
 		Host:               host,
 		Port:               port,
@@ -107,11 +110,29 @@ func TestIntegration(t *testing.T) {
 		}
 	}
 
+	dialedDomain := ""
+	dialedAddr := ""
+	actualResolutionTime := time.Duration(0)
+	actualConnectTime := time.Duration(0)
+	actualHandshakeTime := time.Duration(0)
+	var statsMutex sync.Mutex
+
 	client := NewClient(&ClientConfig{
 		Host:        "fallbacks.getiantem.org",
 		Port:        443,
 		Masquerades: masquerades,
 		RootCAs:     rootCAs,
+		OnDialStats: func(success bool, domain, addr string, resolutionTime, connectTime, handshakeTime time.Duration) {
+			if success {
+				statsMutex.Lock()
+				defer statsMutex.Unlock()
+				dialedDomain = domain
+				dialedAddr = addr
+				actualResolutionTime = resolutionTime
+				actualConnectTime = connectTime
+				actualHandshakeTime = handshakeTime
+			}
+		},
 	})
 	defer client.Close()
 
@@ -131,4 +152,12 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("Unable to read response from Google: %s", err)
 	}
 	assert.Equal(t, expectedGoogleResponse, string(b), "Didn't get expected response from Google")
+
+	statsMutex.Lock()
+	defer statsMutex.Unlock()
+	assert.True(t, dialedDomain == "100partnerproramme.de" || dialedDomain == "10minutemail.com", "Dialed domain didn't match one of the masquerade domains", dialedDomain)
+	assert.NotEqual(t, "", dialedAddr, "Should have received an addr")
+	assert.NotEqual(t, time.Duration(0), actualResolutionTime, "Should have received a resolutionTime")
+	assert.NotEqual(t, time.Duration(0), actualConnectTime, "Should have received a connectTime")
+	assert.NotEqual(t, time.Duration(0), actualHandshakeTime, "Should have received a handshakeTime")
 }
