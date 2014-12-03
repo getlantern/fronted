@@ -155,7 +155,7 @@ func TestIntegration(t *testing.T) {
 
 	statsMutex.Lock()
 	defer statsMutex.Unlock()
-	assert.True(t, dialedDomain == "100partnerproramme.de" || dialedDomain == "10minutemail.com", "Dialed domain didn't match one of the masquerade domains", dialedDomain)
+	assert.True(t, dialedDomain == "100partnerprogramme.de" || dialedDomain == "10minutemail.com", "Dialed domain didn't match one of the masquerade domains", dialedDomain)
 	assert.NotEqual(t, "", dialedAddr, "Should have received an addr")
 	assert.NotEqual(t, time.Duration(0), actualResolutionTime, "Should have received a resolutionTime")
 	assert.NotEqual(t, time.Duration(0), actualConnectTime, "Should have received a connectTime")
