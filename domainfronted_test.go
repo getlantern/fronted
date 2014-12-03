@@ -61,7 +61,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	client := NewClient(&ClientConfig{
-		Host: "roundrobin.getiantem.org",
+		Host: "fallbacks.getiantem.org",
 		Port: 443,
 		Masquerades: []*Masquerade{
 			&Masquerade{
