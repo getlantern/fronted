@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/getlantern/enproxy"
-	"github.com/getlantern/flashlight/statreporter"
+	// "github.com/getlantern/flashlight/statreporter"
 	"github.com/getlantern/flashlight/statserver"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/keyman"
@@ -107,21 +107,21 @@ func (server *Server) Serve(l net.Listener) error {
 	}
 
 	// Hook into stats reporting if necessary
-	servingStats := server.startServingStatsIfNecessary()
+	// servingStats := server.startServingStatsIfNecessary()
 
-	// Add callbacks to track bytes given
-	proxy.OnBytesReceived = func(ip string, bytes int64) {
-		statreporter.OnBytesGiven(ip, bytes)
-		if servingStats {
-			server.StatServer.OnBytesReceived(ip, bytes)
-		}
-	}
-	proxy.OnBytesSent = func(ip string, bytes int64) {
-		statreporter.OnBytesGiven(ip, bytes)
-		if servingStats {
-			server.StatServer.OnBytesSent(ip, bytes)
-		}
-	}
+	// // Add callbacks to track bytes given
+	// proxy.OnBytesReceived = func(ip string, bytes int64) {
+	// 	statreporter.OnBytesGiven(ip, bytes)
+	// 	if servingStats {
+	// 		server.StatServer.OnBytesReceived(ip, bytes)
+	// 	}
+	// }
+	// proxy.OnBytesSent = func(ip string, bytes int64) {
+	// 	statreporter.OnBytesGiven(ip, bytes)
+	// 	if servingStats {
+	// 		server.StatServer.OnBytesSent(ip, bytes)
+	// 	}
+	// }
 
 	proxy.Start()
 
