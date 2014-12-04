@@ -19,7 +19,7 @@ var (
 	httpIdleTimeout = 70 * time.Second
 
 	// Points in time, mostly used for generating certificates
-	TEN_YEARS_FROM_TODAY = time.Now().AddDate(10, 0, 0)
+	tenYearsFromToday = time.Now().AddDate(10, 0, 0)
 
 	// Default TLS configuration for servers
 	defaultTlsServerConfig = &tls.Config{
@@ -172,7 +172,7 @@ func (ctx *CertContext) InitServerCert(host string) (err error) {
 	}
 
 	log.Debugf("Creating new server cert at: %s", ctx.ServerCertFile)
-	ctx.ServerCert, err = ctx.PK.TLSCertificateFor("Lantern", host, TEN_YEARS_FROM_TODAY, true, nil)
+	ctx.ServerCert, err = ctx.PK.TLSCertificateFor("Lantern", host, tenYearsFromToday, true, nil)
 	if err != nil {
 		return
 	}
