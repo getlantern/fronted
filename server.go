@@ -109,10 +109,6 @@ func (server *Server) Listen() (net.Listener, error) {
 }
 
 func (server *Server) Serve(l net.Listener) error {
-	if server.Host != "" {
-		log.Debugf("Running as host %s", server.Host)
-	}
-
 	// Set up an enproxy Proxy
 	proxy := &enproxy.Proxy{
 		Dial:            server.dialDestination,
