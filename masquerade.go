@@ -1,4 +1,4 @@
-package domainfronted
+package fronted
 
 import (
 	"fmt"

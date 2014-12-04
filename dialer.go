@@ -1,4 +1,5 @@
-package domainfronted
+// package fronted provides a client and server for domain-fronted proxying.
+package fronted
 
 import (
 	"crypto/tls"
@@ -14,8 +15,7 @@ import (
 	"github.com/getlantern/connpool"
 	"github.com/getlantern/enproxy"
 	"github.com/getlantern/golog"
-
-	"gopkg.in/getlantern/tlsdialer.v2"
+	"github.com/getlantern/tlsdialer"
 )
 
 const (
