@@ -19,14 +19,6 @@ const (
 	expectedGoogleResponse = "Google is built by a large team of engineers, designers, researchers, robots, and others in many different sites across the globe. It is updated continuously, and built with more tools and technologies than we can shake a stick at. If you'd like to help us out, see google.com/careers.\n"
 )
 
-func TestString(t *testing.T) {
-	d := NewDialer(&Config{
-		Host: "localhost",
-		Port: 3253,
-	})
-	assert.Equal(t, "Fronted dialer to localhost:3253", d.String(), "String() should return correct value")
-}
-
 func TestBadProtocol(t *testing.T) {
 	d := NewDialer(&Config{})
 	_, err := d.Dial("udp", "127.0.0.1:25324")
