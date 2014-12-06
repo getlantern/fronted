@@ -116,6 +116,8 @@ func (d *Dialer) Dial(network, addr string) (net.Conn, error) {
 		return nil, fmt.Errorf("Protocol %s is not supported, only tcp is supported", network)
 	}
 
+	log.Debugf("Dialing %s using %s:%d", addr, d.Host, d.Port)
+
 	conn := &enproxy.Conn{
 		Addr:   addr,
 		Config: d.enproxyConfig,
