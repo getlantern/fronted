@@ -164,6 +164,10 @@ func (d *Dialer) HttpClientUsing(masquerade *Masquerade) *http.Client {
 	}
 }
 
+func (d *Dialer) String() string {
+	return fmt.Sprintf("Fronted dialer to %s:%d", d.Host, d.Port)
+}
+
 func (d *Dialer) enproxyConfigWith(dialProxy func(addr string) (net.Conn, error)) *enproxy.Config {
 	return &enproxy.Config{
 		DialProxy: dialProxy,
