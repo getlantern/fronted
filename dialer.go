@@ -59,7 +59,7 @@ type Config struct {
 	BufferRequests bool
 
 	// DialTimeoutMillis: how long to wait on dialing server before timing out
-	// (defaults to 5 seconds)
+	// (defaults to 20 seconds)
 	DialTimeoutMillis int
 
 	// RedialAttempts: number of times to try redialing. The total number of
