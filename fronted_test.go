@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -32,6 +33,18 @@ func TestBadEnproxyConn(t *testing.T) {
 	})
 	_, err := d.Dial("tcp", "www.google.com")
 	assert.Error(t, err, "Dialing using a non-existent host should have failed")
+}
+
+func TestReplaceBadOnDial(t *testing.T) {
+	d := NewDialer(&Config{
+		Host: "fallbacks.getiantem.org",
+		Port: 443,
+		OnDial: func(conn net.Conn, err error) (net.Conn, error) {
+			return nil, fmt.Errorf("Gotcha!")
+		},
+	})
+	_, err := d.Dial("tcp", "www.google.com")
+	assert.Error(t, err, "Dialing using a bad OnDial should fail")
 }
 
 func TestHttpClientWithBadEnproxyConn(t *testing.T) {

@@ -73,6 +73,11 @@ type Config struct {
 	// values indicating higher QOS.
 	QOS int
 
+	// OnDial: optional callback that gets invoked whenever we dial the server.
+	// The Conn and error returned from this callback will be used in lieu of
+	// the originals.
+	OnDial func(conn net.Conn, err error) (net.Conn, error)
+
 	// OnDialStats is an optional callback that will get called on every dial to
 	// the server to report stats on what was dialed and how long each step
 	// took.
@@ -105,7 +110,11 @@ func NewDialer(cfg *Config) *Dialer {
 		Dial:         d.dialServer,
 	}
 	d.enproxyConfig = d.enproxyConfigWith(func(addr string) (net.Conn, error) {
-		return d.connPool.Get()
+		conn, err := d.connPool.Get()
+		if d.OnDial != nil {
+			conn, err = d.OnDial(conn, err)
+		}
+		return conn, err
 	})
 	return d
 }
