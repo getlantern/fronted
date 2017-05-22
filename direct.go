@@ -224,9 +224,9 @@ func (d *direct) dialWith(in chan *Masquerade, network string) (net.Conn, bool, 
 			if err := d.headCheck(m); err != nil {
 				log.Tracef("Could not perform successful head request: %v", err)
 			} else {
+				m.LastVetted = time.Now()
 				// Requeue the working connection to masquerades
 				d.masquerades <- m
-				m.LastVetted = time.Now()
 				select {
 				case d.toCache <- m:
 					// ok
