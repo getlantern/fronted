@@ -5,34 +5,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func testEq(a, b []*Masquerade) bool {
-
-	if a == nil && b == nil {
-		return true
-	}
-
-	if a == nil || b == nil {
-		return false
-	}
-
-	if len(a) != len(b) {
-		return false
-	}
-
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-
-	return true
-}
+const (
+	testURL = "http://d157vud77ygy87.cloudfront.net/measurements"
+)
 
 func TestDirectDomainFronting(t *testing.T) {
 	dir, err := ioutil.TempDir("", "direct_test")
@@ -52,13 +34,13 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client := &http.Client{
 		Transport: NewDirect(30 * time.Second),
 	}
-	url := "https://d2wi0vwulmtn99.cloudfront.net/cloud.yaml.gz"
-	if resp, err := client.Head(url); err != nil {
+	req, _ := http.NewRequest(http.MethodPost, testURL, strings.NewReader("{'bad': 'stuff'}"))
+	resp, err := client.Do(req)
+	if err != nil {
 		t.Fatalf("Could not get response: %v", err)
-	} else {
-		if 200 != resp.StatusCode {
-			t.Fatalf("Unexpected response status: %v", resp.StatusCode)
-		}
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("Unexpected response status: %v", resp.StatusCode)
 	}
 
 	log.Debugf("DIRECT DOMAIN FRONTING TEST SUCCEEDED")

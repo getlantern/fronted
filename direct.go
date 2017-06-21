@@ -1,10 +1,12 @@
 package fronted
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -21,10 +23,12 @@ import (
 )
 
 const (
-	numberToVetInitially       = 10
+	numberToVetInitially       = 1000
 	defaultMaxAllowedCachedAge = 24 * time.Hour
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
+	maxTries                   = 10000 // 6
+	headTestURL                = "http://dlymairwlc89h.cloudfront.net/index.html"
 )
 
 var (
@@ -35,6 +39,7 @@ var (
 	clientSessionCache = tls.NewLRUClientSessionCache(1000)
 )
 
+// direct is an implementation of http.RoundTripper
 type direct struct {
 	tlsConfigsMutex     sync.Mutex
 	tlsConfigs          map[string]*tls.Config
@@ -111,26 +116,44 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 func (d *direct) vetInitial(numberToVet int) {
 	log.Tracef("Vetting %d initial candidates in parallel", numberToVet)
 	for i := 0; i < numberToVet; i++ {
-		go d.vetOne()
+		go func() {
+			for {
+				more := d.vetOne()
+				if !more {
+					return
+				}
+			}
+		}()
 	}
 }
 
-func (d *direct) vetOne() {
+func (d *direct) vetOne() bool {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
-	for {
-		log.Trace("Vetting one")
-		conn, masqueradesRemain, err := d.dialWith(d.candidates, "tcp")
-		if err == nil {
-			conn.Close()
-			log.Trace("Finished vetting one")
-			return
-		}
-		if !masqueradesRemain {
-			log.Trace("Nothing left to vet")
-			return
-		}
+	log.Trace("Vetting one")
+	conn, keepMasquerade, masqueradesRemain, err := d.dialWith(d.candidates)
+	if err != nil {
+		return masqueradesRemain
 	}
+	defer conn.Close()
+
+	// Do a HEAD request to verify that domain-fronting works
+	client := &http.Client{
+		Transport: httpTransport(conn, nil),
+	}
+	resp, err := client.Head(headTestURL)
+	if err != nil {
+		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
+		return masqueradesRemain
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
+		return masqueradesRemain
+	}
+	log.Trace("Finished vetting one")
+	keepMasquerade()
+	return false
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
@@ -139,48 +162,58 @@ func NewDirect(timeout time.Duration) http.RoundTripper {
 	if !ok {
 		panic(fmt.Errorf("No DirectHttpClient available within %v", timeout))
 	}
-	return instance.(*direct).NewDirect()
-}
-
-// NewDirect creates a new http.RoundTripper that does direct domain fronting.
-func (d *direct) NewDirect() http.RoundTripper {
-	return &directTransport{
-		Transport: http.Transport{
-			Dial:                d.Dial,
-			TLSHandshakeTimeout: 40 * time.Second,
-			DisableKeepAlives:   true,
-			TLSClientConfig: &tls.Config{
-				ClientSessionCache: clientSessionCache,
-			},
-		},
-	}
+	return instance.(http.RoundTripper)
 }
 
 // Do continually retries a given request until it succeeds because some
 // fronting providers will return a 403 for some domains.
-func (d *direct) Do(req *http.Request) (*http.Response, error) {
-	for i := 0; i < 6; i++ {
-		if resp, err := d.NewDirect().RoundTrip(req); err != nil {
-			log.Errorf("Could not complete request %v", err)
-		} else if resp.StatusCode > 199 && resp.StatusCode < 400 {
-			return resp, err
-		} else {
-			_ = resp.Body.Close()
+func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body []byte
+	var err error
+	if req.Body != nil {
+		// store body in-memory to be able to replay it if necessary
+		body, err = ioutil.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to read request body: %v", err)
 		}
 	}
+	for i := 0; i < maxTries; i++ {
+		log.Debug("Trying")
+		if body != nil {
+			req.Body = ioutil.NopCloser(bytes.NewReader(body))
+		}
+		conn, keepMasquerade, err := d.dial()
+		if err != nil {
+			// unable to find good masquerade, fail
+			return nil, err
+		}
+		tr := httpTransport(conn, clientSessionCache)
+		resp, err := tr.RoundTrip(req)
+		if err != nil {
+			log.Errorf("Could not complete request %v", err)
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode > 199 && resp.StatusCode < 400 {
+			keepMasquerade()
+			return resp, nil
+		}
+		log.Debug(resp.StatusCode)
+	}
+
 	return nil, errors.New("Could not complete request even with retries")
 }
 
 // Dial dials out using a masquerade. If the available masquerade fails, it
 // retries with others until it either succeeds or exhausts the available
-// masquerades. The specified addr is ignored, it's simply included so that this
-// method satisfies the Transport.Dial interface.
-func (d *direct) Dial(network, addr string) (net.Conn, error) {
-	conn, _, err := d.dialWith(d.masquerades, network)
-	return conn, err
+// masquerades. If successful, it returns a function that the caller can use to
+// keep the masquerade (i.e. if masquerade was good, keep it).
+func (d *direct) dial() (net.Conn, func(), error) {
+	conn, keepMasquerade, _, err := d.dialWith(d.masquerades)
+	return conn, keepMasquerade, err
 }
 
-func (d *direct) dialWith(in chan *Masquerade, network string) (net.Conn, bool, error) {
+func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(), bool, error) {
 	retryLater := make([]*Masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
@@ -199,7 +232,7 @@ func (d *direct) dialWith(in chan *Masquerade, network string) (net.Conn, bool, 
 			case m = <-d.candidates:
 				log.Trace("Got unvetted masquerade")
 			default:
-				return nil, false, errors.New("Could not dial any masquerade?")
+				return nil, nil, false, errors.New("Could not dial any masquerade?")
 			}
 		}
 
@@ -221,9 +254,14 @@ func (d *direct) dialWith(in chan *Masquerade, network string) (net.Conn, bool, 
 			}
 		} else {
 			log.Tracef("Got successful connection to: %v", m)
-			if err := d.headCheck(m); err != nil {
-				log.Tracef("Could not perform successful head request: %v", err)
-			} else {
+			idleTimeout := 70 * time.Second
+
+			log.Trace("Wrapping connecting in idletiming connection")
+			conn = idletiming.Conn(conn, idleTimeout, func() {
+				log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
+			})
+			log.Trace("Returning connection")
+			keepMasquerade := func() {
 				// Requeue the working connection to masquerades
 				d.masquerades <- m
 				m.LastVetted = time.Now()
@@ -233,15 +271,8 @@ func (d *direct) dialWith(in chan *Masquerade, network string) (net.Conn, bool, 
 				default:
 					// cache writing has fallen behind, drop masquerade
 				}
-				idleTimeout := 70 * time.Second
-
-				log.Trace("Wrapping connecting in idletiming connection")
-				conn = idletiming.Conn(conn, idleTimeout, func() {
-					log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
-				})
-				log.Trace("Returning connection")
-				return conn, true, nil
 			}
+			return conn, keepMasquerade, true, nil
 		}
 	}
 }
@@ -286,32 +317,19 @@ func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
 	return tlsConfig
 }
 
-// headCheck checks to make sure we can actually make a DDF head request through a
-// given masquerade. We don't reuse the underlying connection here because that confuses
-// the http.Client's internal transport.
-func (d *direct) headCheck(m *Masquerade) error {
-	trans := &http.Transport{
-		Dial: func(network, address string) (net.Conn, error) {
-			return d.dialServerWith(m)
+func httpTransport(conn net.Conn, clientSessionCache tls.ClientSessionCache) http.RoundTripper {
+	return &directTransport{
+		Transport: http.Transport{
+			Dial: func(network, addr string) (net.Conn, error) {
+				return conn, nil
+			},
+			TLSHandshakeTimeout: 40 * time.Second,
+			DisableKeepAlives:   true,
+			TLSClientConfig: &tls.Config{
+				ClientSessionCache: clientSessionCache,
+			},
 		},
-		TLSHandshakeTimeout: 40 * time.Second,
-		DisableKeepAlives:   true,
 	}
-
-	client := &http.Client{
-		Transport: trans,
-	}
-	url := "http://dlymairwlc89h.cloudfront.net/index.html"
-	resp, err := client.Head(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if 200 != resp.StatusCode {
-		return fmt.Errorf("Unexpected response status: %v, %v", resp.StatusCode, resp.Status)
-	}
-	log.Tracef("Successfully passed HEAD request through: %v", m)
-	return nil
 }
 
 // directTransport is a wrapper struct enabling us to modify the protocol of outgoing
