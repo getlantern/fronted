@@ -113,6 +113,22 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 	}
 }
 
+// Vet vets the specified Masquerade, verifying certificate using the given CertPool
+func Vet(m *Masquerade, pool *x509.CertPool) bool {
+	d := &direct{
+		tlsConfigs:          make(map[string]*tls.Config),
+		certPool:            pool,
+		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
+		maxCacheSize:        defaultMaxCacheSize,
+	}
+	conn, _, err := d.doDial(m)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	return headCheck(conn)
+}
+
 func (d *direct) vet(numberToVet int) {
 	log.Tracef("Vetting %d initial candidates in parallel", numberToVet)
 	for i := 0; i < numberToVet; i++ {
@@ -138,25 +154,30 @@ func (d *direct) vetOne() bool {
 	}
 	defer conn.Close()
 
-	// Do a HEAD request to verify that domain-fronting works
+	if !masqueradeGood(headCheck(conn)) {
+		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
+		return masqueradesRemain
+	}
+	log.Trace("Finished vetting one")
+	return false
+}
+
+// headCheck does a HEAD request to verify that domain-fronting works
+func headCheck(conn net.Conn) bool {
 	client := &http.Client{
 		Transport: httpTransport(conn, nil),
 	}
 	resp, err := client.Head(headTestURL)
 	if err != nil {
 		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
-		masqueradeGood(false)
-		return masqueradesRemain
+		return false
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
-		masqueradeGood(false)
-		return masqueradesRemain
+		return false
 	}
-	log.Trace("Finished vetting one")
-	masqueradeGood(true)
-	return false
+	return true
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
@@ -214,12 +235,12 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 // masquerades. If successful, it returns a function that the caller can use to
 // tell us whether the masquerade is good or not (i.e. if masquerade was good,
 // keep it, else vet a new one).
-func (d *direct) dial() (net.Conn, func(bool), error) {
+func (d *direct) dial() (net.Conn, func(bool) bool, error) {
 	conn, masqueradeGood, _, err := d.dialWith(d.masquerades)
 	return conn, masqueradeGood, err
 }
 
-func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool), bool, error) {
+func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool, error) {
 	retryLater := make([]*Masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
@@ -247,27 +268,10 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool), bool, erro
 		// We do the full TLS connection here because in practice the domains at a given IP
 		// address can change frequently on CDNs, so the certificate may not match what
 		// we expect.
-		if conn, err := d.dialServerWith(m); err != nil {
-			log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
-			// Don't re-add this candidate if it's any certificate error, as that
-			// will just keep failing and will waste connections. We can't access the underlying
-			// error at this point so just look for "certificate" and "handshake".
-			if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
-				log.Tracef("Not re-adding candidate that failed on error '%v'", err.Error())
-			} else {
-				log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
-				retryLater = append(retryLater, m)
-			}
-		} else {
-			log.Tracef("Got successful connection to: %v", m)
-			idleTimeout := 70 * time.Second
-
-			log.Trace("Wrapping connecting in idletiming connection")
-			conn = idletiming.Conn(conn, idleTimeout, func() {
-				log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
-			})
+		conn, retriable, err := d.doDial(m)
+		if err == nil {
 			log.Trace("Returning connection")
-			masqueradeGood := func(good bool) {
+			masqueradeGood := func(good bool) bool {
 				if good {
 					// Requeue the working connection to masquerades
 					d.masquerades <- m
@@ -281,10 +285,40 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool), bool, erro
 				} else {
 					go d.vetOneUntilGood()
 				}
+
+				return good
 			}
-			return conn, masqueradeGood, true, nil
+			return conn, masqueradeGood, true, err
+		} else if retriable {
+			retryLater = append(retryLater, m)
 		}
 	}
+}
+
+func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
+	conn, err = d.dialServerWith(m)
+	if err != nil {
+		log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
+		// Don't re-add this candidate if it's any certificate error, as that
+		// will just keep failing and will waste connections. We can't access the underlying
+		// error at this point so just look for "certificate" and "handshake".
+		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
+			log.Tracef("Not re-adding candidate that failed on error '%v'", err.Error())
+			retriable = false
+		} else {
+			log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
+			retriable = true
+		}
+	} else {
+		log.Tracef("Got successful connection to: %v", m)
+		idleTimeout := 70 * time.Second
+
+		log.Trace("Wrapping connecting in idletiming connection")
+		conn = idletiming.Conn(conn, idleTimeout, func() {
+			log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
+		})
+	}
+	return
 }
 
 func (d *direct) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
