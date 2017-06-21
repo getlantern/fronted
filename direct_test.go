@@ -34,7 +34,8 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client := &http.Client{
 		Transport: NewDirect(30 * time.Second),
 	}
-	req, _ := http.NewRequest(http.MethodPost, testURL, strings.NewReader("{'bad': 'stuff'}"))
+	req, _ := http.NewRequest(http.MethodGet, testURL, strings.NewReader("{'bad': 'stuff'}"))
+	// req, _ := http.NewRequest(http.MethodGet, testURL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Could not get response: %v", err)

@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	numberToVetInitially       = 1000
+	numberToVetInitially       = 6
 	defaultMaxAllowedCachedAge = 24 * time.Hour
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
@@ -92,7 +92,7 @@ func Configure(pool *x509.CertPool, masquerades map[string][]*Masquerade, cacheF
 
 	d.loadCandidates(masquerades)
 	if numberToVet > 0 {
-		d.vetInitial(numberToVet)
+		d.vet(numberToVet)
 	} else {
 		log.Debug("Not vetting any masquerades because we have enough cached ones")
 	}
@@ -113,17 +113,18 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 	}
 }
 
-func (d *direct) vetInitial(numberToVet int) {
+func (d *direct) vet(numberToVet int) {
 	log.Tracef("Vetting %d initial candidates in parallel", numberToVet)
 	for i := 0; i < numberToVet; i++ {
-		go func() {
-			for {
-				more := d.vetOne()
-				if !more {
-					return
-				}
-			}
-		}()
+		go d.vetOneUntilGood()
+	}
+}
+
+func (d *direct) vetOneUntilGood() {
+	for {
+		if !d.vetOne() {
+			return
+		}
 	}
 }
 
@@ -131,7 +132,7 @@ func (d *direct) vetOne() bool {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
 	log.Trace("Vetting one")
-	conn, keepMasquerade, masqueradesRemain, err := d.dialWith(d.candidates)
+	conn, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates)
 	if err != nil {
 		return masqueradesRemain
 	}
@@ -144,15 +145,17 @@ func (d *direct) vetOne() bool {
 	resp, err := client.Head(headTestURL)
 	if err != nil {
 		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
+		masqueradeGood(false)
 		return masqueradesRemain
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
+		masqueradeGood(false)
 		return masqueradesRemain
 	}
 	log.Trace("Finished vetting one")
-	keepMasquerade()
+	masqueradeGood(true)
 	return false
 }
 
@@ -182,7 +185,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		if body != nil {
 			req.Body = ioutil.NopCloser(bytes.NewReader(body))
 		}
-		conn, keepMasquerade, err := d.dial()
+		conn, masqueradeGood, err := d.dial()
 		if err != nil {
 			// unable to find good masquerade, fail
 			return nil, err
@@ -191,13 +194,15 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		resp, err := tr.RoundTrip(req)
 		if err != nil {
 			log.Errorf("Could not complete request %v", err)
+			masqueradeGood(false)
 			continue
 		}
 		resp.Body.Close()
 		if resp.StatusCode > 199 && resp.StatusCode < 400 {
-			keepMasquerade()
+			masqueradeGood(true)
 			return resp, nil
 		}
+		masqueradeGood(false)
 		log.Debug(resp.StatusCode)
 	}
 
@@ -207,13 +212,14 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 // Dial dials out using a masquerade. If the available masquerade fails, it
 // retries with others until it either succeeds or exhausts the available
 // masquerades. If successful, it returns a function that the caller can use to
-// keep the masquerade (i.e. if masquerade was good, keep it).
-func (d *direct) dial() (net.Conn, func(), error) {
-	conn, keepMasquerade, _, err := d.dialWith(d.masquerades)
-	return conn, keepMasquerade, err
+// tell us whether the masquerade is good or not (i.e. if masquerade was good,
+// keep it, else vet a new one).
+func (d *direct) dial() (net.Conn, func(bool), error) {
+	conn, masqueradeGood, _, err := d.dialWith(d.masquerades)
+	return conn, masqueradeGood, err
 }
 
-func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(), bool, error) {
+func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool), bool, error) {
 	retryLater := make([]*Masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
@@ -261,18 +267,22 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(), bool, error) {
 				log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
 			})
 			log.Trace("Returning connection")
-			keepMasquerade := func() {
-				// Requeue the working connection to masquerades
-				d.masquerades <- m
-				m.LastVetted = time.Now()
-				select {
-				case d.toCache <- m:
-					// ok
-				default:
-					// cache writing has fallen behind, drop masquerade
+			masqueradeGood := func(good bool) {
+				if good {
+					// Requeue the working connection to masquerades
+					d.masquerades <- m
+					m.LastVetted = time.Now()
+					select {
+					case d.toCache <- m:
+						// ok
+					default:
+						// cache writing has fallen behind, drop masquerade
+					}
+				} else {
+					go d.vetOneUntilGood()
 				}
 			}
-			return conn, keepMasquerade, true, nil
+			return conn, masqueradeGood, true, nil
 		}
 	}
 }
