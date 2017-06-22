@@ -208,7 +208,6 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 	for i := 0; i < maxTries; i++ {
-		log.Debug("Trying")
 		if body != nil {
 			req.Body = ioutil.NopCloser(bytes.NewReader(body))
 		}
@@ -225,12 +224,11 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			continue
 		}
 		resp.Body.Close()
-		if resp.StatusCode > 199 && resp.StatusCode < 400 {
+		if resp.StatusCode != http.StatusForbidden {
 			masqueradeGood(true)
 			return resp, nil
 		}
 		masqueradeGood(false)
-		log.Debug(resp.StatusCode)
 	}
 
 	return nil, errors.New("Could not complete request even with retries")
