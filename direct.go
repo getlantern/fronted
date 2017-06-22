@@ -28,7 +28,7 @@ const (
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
 	maxTries                   = 6
-	testURL                    = "http://d157vud77ygy87.cloudfront.net/measurements"
+	testURL                    = "http://d157vud77ygy87.cloudfront.net/measurements" // borda
 )
 
 var (
