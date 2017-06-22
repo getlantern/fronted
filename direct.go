@@ -277,9 +277,9 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool,
 			log.Trace("Returning connection")
 			masqueradeGood := func(good bool) bool {
 				if good {
+					m.LastVetted = time.Now()
 					// Requeue the working connection to masquerades
 					d.masquerades <- m
-					m.LastVetted = time.Now()
 					select {
 					case d.toCache <- m:
 						// ok
