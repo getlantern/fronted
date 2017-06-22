@@ -28,7 +28,7 @@ const (
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
 	maxTries                   = 10000 // 6
-	headTestURL                = "http://dlymairwlc89h.cloudfront.net/index.html"
+	testURL                    = "http://d157vud77ygy87.cloudfront.net/measurements"
 )
 
 var (
@@ -126,7 +126,7 @@ func Vet(m *Masquerade, pool *x509.CertPool) bool {
 		return false
 	}
 	defer conn.Close()
-	return headCheck(conn)
+	return postCheck(conn)
 }
 
 func (d *direct) vet(numberToVet int) {
@@ -154,7 +154,7 @@ func (d *direct) vetOne() bool {
 	}
 	defer conn.Close()
 
-	if !masqueradeGood(headCheck(conn)) {
+	if !masqueradeGood(postCheck(conn)) {
 		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
 		return masqueradesRemain
 	}
@@ -162,18 +162,24 @@ func (d *direct) vetOne() bool {
 	return false
 }
 
-// headCheck does a HEAD request to verify that domain-fronting works
-func headCheck(conn net.Conn) bool {
+// postCheck does a post with invalid data to verify domain-fronting works
+func postCheck(conn net.Conn) bool {
 	client := &http.Client{
 		Transport: httpTransport(conn, nil),
 	}
-	resp, err := client.Head(headTestURL)
+	return doPostCheck(client)
+}
+
+func doPostCheck(client *http.Client) bool {
+	req, _ := http.NewRequest(http.MethodPost, testURL, strings.NewReader("{'junk': 'field'}"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
 		return false
 	}
 	resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusBadRequest {
 		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
 		return false
 	}

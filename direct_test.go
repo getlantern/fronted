@@ -5,15 +5,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-)
-
-const (
-	testURL = "http://d157vud77ygy87.cloudfront.net/measurements"
 )
 
 func TestDirectDomainFronting(t *testing.T) {
@@ -34,15 +29,6 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client := &http.Client{
 		Transport: NewDirect(30 * time.Second),
 	}
-	req, _ := http.NewRequest(http.MethodGet, testURL, strings.NewReader("{'bad': 'stuff'}"))
-	// req, _ := http.NewRequest(http.MethodGet, testURL, nil)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("Could not get response: %v", err)
-	}
-	if resp.StatusCode != 200 {
-		t.Fatalf("Unexpected response status: %v", resp.StatusCode)
-	}
-
+	assert.True(t, doPostCheck(client))
 	log.Debugf("DIRECT DOMAIN FRONTING TEST SUCCEEDED")
 }
