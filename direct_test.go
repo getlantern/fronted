@@ -32,3 +32,13 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	assert.True(t, doPostCheck(client))
 	log.Debugf("DIRECT DOMAIN FRONTING TEST SUCCEEDED")
 }
+
+func TestVet(t *testing.T) {
+	pool := trustedCACerts(t)
+	for _, m := range DefaultCloudfrontMasquerades {
+		if Vet(m, pool) {
+			return
+		}
+	}
+	t.Fatal("None of the default masquerades vetted successfully")
+}
