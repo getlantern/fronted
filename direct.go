@@ -28,7 +28,7 @@ const (
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
 	maxTries                   = 6
-	testURL                    = "http://d157vud77ygy87.cloudfront.net/measurements" // borda
+	testURL                    = "http://d157vud77ygy87.cloudfront.net/ping" // borda
 )
 
 var (
@@ -171,7 +171,7 @@ func postCheck(conn net.Conn) bool {
 }
 
 func doPostCheck(client *http.Client) bool {
-	req, _ := http.NewRequest(http.MethodPost, testURL, strings.NewReader("{'junk': 'field'}"))
+	req, _ := http.NewRequest(http.MethodPost, testURL, strings.NewReader("a"))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -179,7 +179,7 @@ func doPostCheck(client *http.Client) bool {
 		return false
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
+	if resp.StatusCode != http.StatusAccepted {
 		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
 		return false
 	}
