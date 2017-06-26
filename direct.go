@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -167,27 +168,30 @@ func postCheck(conn net.Conn) bool {
 	client := &http.Client{
 		Transport: httpTransport(conn, nil),
 	}
-	return doCheck(client, http.MethodPost, testURL)
+	return doCheck(client, http.MethodPost, http.StatusAccepted, testURL)
 }
 
-func doCheck(client *http.Client, method string, u string) bool {
-	req, _ := http.NewRequest(method, u, strings.NewReader("a"))
-	req.Header.Set("Content-Type", "application/json")
+func doCheck(client *http.Client, method string, expectedStatus int, u string) bool {
+	isPost := method == http.MethodPost
+	var requestBody io.Reader
+	if isPost {
+		requestBody = strings.NewReader("a")
+	}
+	req, _ := http.NewRequest(method, u, requestBody)
+	if isPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade: %v", err)
+		log.Tracef("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
 		return false
 	}
-	defer resp.Body.Close()
-	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-	if length > 0 {
-		read, _ := ioutil.ReadAll(resp.Body)
-		if len(read) != length {
-			return false
-		}
+	if resp.Body != nil {
+		io.Copy(ioutil.Discard, resp.Body)
+		resp.Body.Close()
 	}
-	if resp.StatusCode != http.StatusAccepted {
-		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
+	if resp.StatusCode != expectedStatus {
+		log.Tracef("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
 		return false
 	}
 	return true
