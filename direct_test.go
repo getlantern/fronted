@@ -29,8 +29,11 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client := &http.Client{
 		Transport: NewDirect(30 * time.Second),
 	}
-	assert.True(t, doPostCheck(client))
-	log.Debugf("DIRECT DOMAIN FRONTING TEST SUCCEEDED")
+	assert.True(t, doCheck(client, http.MethodPost, testURL))
+	// client = &http.Client{
+	// 	Transport: NewDirect(30 * time.Second),
+	// }
+	// assert.True(t, doCheck(client, http.MethodGet, "http://d33pfmbpauhmvd.cloudfront.net/proxies.yaml.gz"))
 }
 
 func TestVet(t *testing.T) {

@@ -155,7 +155,7 @@ func (d *direct) vetOne() bool {
 	defer conn.Close()
 
 	if !masqueradeGood(postCheck(conn)) {
-		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
+		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade")
 		return masqueradesRemain
 	}
 	log.Trace("Finished vetting one")
@@ -167,18 +167,25 @@ func postCheck(conn net.Conn) bool {
 	client := &http.Client{
 		Transport: httpTransport(conn, nil),
 	}
-	return doPostCheck(client)
+	return doCheck(client, http.MethodPost, testURL)
 }
 
-func doPostCheck(client *http.Client) bool {
-	req, _ := http.NewRequest(http.MethodPost, testURL, strings.NewReader("a"))
+func doCheck(client *http.Client, method string, u string) bool {
+	req, _ := http.NewRequest(method, u, strings.NewReader("a"))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Tracef("Unsuccessful vetting with HEAD request, discarding masquerade")
+		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade: %v", err)
 		return false
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if length > 0 {
+		read, _ := ioutil.ReadAll(resp.Body)
+		if len(read) != length {
+			return false
+		}
+	}
 	if resp.StatusCode != http.StatusAccepted {
 		log.Tracef("Unexpected response status vetting masquerade: %v, %v", resp.StatusCode, resp.Status)
 		return false
@@ -223,11 +230,11 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			masqueradeGood(false)
 			continue
 		}
-		resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
 			masqueradeGood(true)
 			return resp, nil
 		}
+		resp.Body.Close()
 		masqueradeGood(false)
 	}
 
