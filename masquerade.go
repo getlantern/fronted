@@ -28,5 +28,7 @@ type Masquerade struct {
 	// LastVetted: the most recent time at which this Masquerade was vetted
 	LastVetted time.Time
 
-	sync.RWMutex
+	// Since this is embedded users MUST pass only pointers to Masquerades, as
+	// copies will not preserve the lock state.
+	sync.Mutex
 }
