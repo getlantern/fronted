@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"sync"
 	"time"
 )
 
@@ -26,4 +27,6 @@ type Masquerade struct {
 
 	// LastVetted: the most recent time at which this Masquerade was vetted
 	LastVetted time.Time
+
+	sync.RWMutex
 }
