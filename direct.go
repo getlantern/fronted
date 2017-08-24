@@ -45,12 +45,13 @@ type direct struct {
 	tlsConfigsMutex     sync.Mutex
 	tlsConfigs          map[string]*tls.Config
 	certPool            *x509.CertPool
-	candidates          chan *Masquerade
-	masquerades         chan *Masquerade
+	candidates          chan *masquerade
+	masquerades         chan *masquerade
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
 	cacheSaveInterval   time.Duration
-	toCache             chan *Masquerade
+	toCache             chan *masquerade
+	mx                  sync.RWMutex
 }
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
@@ -78,12 +79,12 @@ func Configure(pool *x509.CertPool, masquerades map[string][]*Masquerade, cacheF
 	d := &direct{
 		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
-		candidates:          make(chan *Masquerade, size),
-		masquerades:         make(chan *Masquerade, size),
+		candidates:          make(chan *masquerade, size),
+		masquerades:         make(chan *masquerade, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
-		toCache:             make(chan *Masquerade, defaultMaxCacheSize),
+		toCache:             make(chan *masquerade, defaultMaxCacheSize),
 	}
 
 	numberToVet := numberToVetInitially
@@ -109,13 +110,17 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 			// choose index uniformly in [i, n-1]
 			r := i + rand.Intn(size-i)
 			log.Trace("Adding candidate")
-			d.candidates <- arr[r]
+			d.candidates <- masqueradeFrom(arr[r])
 		}
 	}
 }
 
 // Vet vets the specified Masquerade, verifying certificate using the given CertPool
 func Vet(m *Masquerade, pool *x509.CertPool) bool {
+	return vet(masqueradeFrom(m), pool)
+}
+
+func vet(m *masquerade, pool *x509.CertPool) bool {
 	d := &direct{
 		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
@@ -255,8 +260,8 @@ func (d *direct) dial() (net.Conn, func(bool) bool, error) {
 	return conn, masqueradeGood, err
 }
 
-func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool, error) {
-	retryLater := make([]*Masquerade, 0)
+func (d *direct) dialWith(in chan *masquerade) (net.Conn, func(bool) bool, bool, error) {
+	retryLater := make([]*masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
 			in <- m
@@ -264,7 +269,7 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool,
 	}()
 
 	for {
-		var m *Masquerade
+		var m *masquerade
 		select {
 		case m = <-in:
 			log.Trace("Got vetted masquerade")
@@ -288,9 +293,9 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool,
 			log.Trace("Returning connection")
 			masqueradeGood := func(good bool) bool {
 				if good {
-					m.Lock()
+					d.mx.Lock()
 					m.LastVetted = time.Now()
-					m.Unlock()
+					d.mx.Unlock()
 					// Requeue the working connection to masquerades
 					d.masquerades <- m
 					select {
@@ -312,7 +317,7 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool,
 	}
 }
 
-func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
+func (d *direct) doDial(m *masquerade) (conn net.Conn, retriable bool, err error) {
 	conn, err = d.dialServerWith(m)
 	if err != nil {
 		log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
@@ -338,8 +343,8 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 	return
 }
 
-func (d *direct) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
-	tlsConfig := d.tlsConfig(masquerade)
+func (d *direct) dialServerWith(m *masquerade) (net.Conn, error) {
+	tlsConfig := d.tlsConfig(m)
 	dialTimeout := 10 * time.Second
 	sendServerNameExtension := false
 
@@ -347,12 +352,12 @@ func (d *direct) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
 		netx.DialTimeout,
 		dialTimeout,
 		"tcp",
-		masquerade.IpAddress+":443",
+		m.IpAddress+":443",
 		sendServerNameExtension, // SNI or no
 		tlsConfig)
 
-	if err != nil && masquerade != nil {
-		err = fmt.Errorf("Unable to dial masquerade %s: %s", masquerade.Domain, err)
+	if err != nil && m != nil {
+		err = fmt.Errorf("Unable to dial masquerade %s: %s", m.Domain, err)
 	}
 	return conn, err
 }
@@ -360,7 +365,7 @@ func (d *direct) dialServerWith(masquerade *Masquerade) (net.Conn, error) {
 // tlsConfig builds a tls.Config for dialing the upstream host. Constructed
 // tls.Configs are cached on a per-masquerade basis to enable client session
 // caching and reduce the amount of PEM certificate parsing.
-func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
+func (d *direct) tlsConfig(m *masquerade) *tls.Config {
 	d.tlsConfigsMutex.Lock()
 	defer d.tlsConfigsMutex.Unlock()
 
