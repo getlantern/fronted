@@ -26,16 +26,7 @@ type Masquerade struct {
 }
 
 type masquerade struct {
-	Domain    string
-	IpAddress string
-
+	Masquerade
 	// lastVetted: the most recent time at which this Masquerade was vetted
 	LastVetted time.Time
-}
-
-func masqueradeFrom(m *Masquerade) *masquerade {
-	return &masquerade{
-		Domain:    m.Domain,
-		IpAddress: m.IpAddress,
-	}
 }

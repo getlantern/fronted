@@ -9,7 +9,7 @@ import (
 
 var (
 	// Nil value indicates end of cache filling
-	fillSentinel *masquerade = nil
+	fillSentinel masquerade
 )
 
 func (d *direct) initCaching(cacheFile string) int {
@@ -19,13 +19,13 @@ func (d *direct) initCaching(cacheFile string) int {
 	return prevetted
 }
 
-func (d *direct) prepopulateMasquerades(cacheFile string) []*masquerade {
-	var cache []*masquerade
+func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
+	var cache []masquerade
 	file, err := os.Open(cacheFile)
 	if err == nil {
 		log.Debugf("Attempting to prepopulate masquerades from cache")
 		defer file.Close()
-		var masquerades []*masquerade
+		var masquerades []masquerade
 		err := json.NewDecoder(file).Decode(&masquerades)
 		if err != nil {
 			log.Errorf("Error prepopulating cached masquerades: %v", err)
@@ -50,7 +50,7 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []*masquerade {
 	return cache
 }
 
-func (d *direct) fillCache(cache []*masquerade, cacheFile string) {
+func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 	saveTimer := time.NewTimer(d.cacheSaveInterval)
 	cacheChanged := false
 	for {
@@ -70,13 +70,11 @@ func (d *direct) fillCache(cache []*masquerade, cacheFile string) {
 			log.Debug("Saving updated masquerade cache")
 			// Truncate cache to max length if necessary
 			if len(cache) > d.maxCacheSize {
-				truncated := make([]*masquerade, d.maxCacheSize)
+				truncated := make([]masquerade, d.maxCacheSize)
 				copy(truncated, cache[len(cache)-d.maxCacheSize:])
 				cache = truncated
 			}
-			d.mx.RLock()
 			b, err := json.Marshal(cache)
-			d.mx.RUnlock()
 			if err != nil {
 				log.Errorf("Unable to marshal cache to JSON: %v", err)
 				break
