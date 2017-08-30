@@ -259,7 +259,12 @@ func (d *direct) dialWith(in chan *Masquerade) (net.Conn, func(bool) bool, bool,
 	retryLater := make([]*Masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
-			in <- m
+			// when network just recovered from offline, retryLater has more
+			// elements than the capacity of the channel.
+			select {
+			case in <- m:
+			default:
+			}
 		}
 	}()
 
