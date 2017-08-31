@@ -16,33 +16,33 @@ func TestCaching(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(dir)
-	cacheFile := filepath.Join(dir, "cachefile")
+	cacheFile := filepath.Join(dir, "cachefile.1")
 
 	makeDirect := func() *direct {
 		d := &direct{
-			candidates:          make(chan *Masquerade, 1000),
-			masquerades:         make(chan *Masquerade, 1000),
+			candidates:          make(chan masquerade, 1000),
+			masquerades:         make(chan masquerade, 1000),
 			maxAllowedCachedAge: 250 * time.Millisecond,
 			maxCacheSize:        2,
 			cacheSaveInterval:   50 * time.Millisecond,
-			toCache:             make(chan *Masquerade, 1000),
+			toCache:             make(chan masquerade, 1000),
 		}
-		go d.fillCache(make([]*Masquerade, 0), cacheFile)
+		go d.fillCache(make([]masquerade, 0), cacheFile)
 		return d
 	}
 
 	now := time.Now()
-	ma := &Masquerade{Domain: "a", IpAddress: "1", LastVetted: now}
-	mb := &Masquerade{Domain: "b", IpAddress: "2", LastVetted: now}
-	mc := &Masquerade{Domain: "c", IpAddress: "3", LastVetted: now}
+	ma := masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now}
+	mb := masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now}
+	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now}
 
 	d := makeDirect()
 	d.toCache <- ma
 	d.toCache <- mb
 	d.toCache <- mc
 
-	readMasquerades := func() []*Masquerade {
-		var result []*Masquerade
+	readMasquerades := func() []masquerade {
+		var result []masquerade
 		for {
 			select {
 			case m := <-d.masquerades:

@@ -17,7 +17,7 @@ func TestDirectDomainFronting(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(dir)
-	cacheFile := filepath.Join(dir, "cachefile")
+	cacheFile := filepath.Join(dir, "cachefile.2")
 	doTestDomainFronting(t, cacheFile)
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile
@@ -33,7 +33,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client = &http.Client{
 		Transport: NewDirect(30 * time.Second),
 	}
-	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, "http://d33pfmbpauhmvd.cloudfront.net/proxies.yaml.gz"))
+	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, "http://d2wi0vwulmtn99.cloudfront.net/proxies.yaml.gz"))
 }
 
 func TestVet(t *testing.T) {
