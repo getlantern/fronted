@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	// Nil value indicates end of cache filling
+	// zero value indicates end of cache filling
 	fillSentinel masquerade
 )
 
