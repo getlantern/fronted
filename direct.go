@@ -45,13 +45,12 @@ type direct struct {
 	tlsConfigsMutex     sync.Mutex
 	tlsConfigs          map[string]*tls.Config
 	certPool            *x509.CertPool
-	candidates          chan *masquerade
-	masquerades         chan *masquerade
+	candidates          chan masquerade
+	masquerades         chan masquerade
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
 	cacheSaveInterval   time.Duration
-	toCache             chan *masquerade
-	mx                  sync.RWMutex
+	toCache             chan masquerade
 }
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
@@ -79,12 +78,12 @@ func Configure(pool *x509.CertPool, masquerades map[string][]*Masquerade, cacheF
 	d := &direct{
 		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
-		candidates:          make(chan *masquerade, size),
-		masquerades:         make(chan *masquerade, size),
+		candidates:          make(chan masquerade, size),
+		masquerades:         make(chan masquerade, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
-		toCache:             make(chan *masquerade, defaultMaxCacheSize),
+		toCache:             make(chan masquerade, defaultMaxCacheSize),
 	}
 
 	numberToVet := numberToVetInitially
@@ -110,17 +109,17 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 			// choose index uniformly in [i, n-1]
 			r := i + rand.Intn(size-i)
 			log.Trace("Adding candidate")
-			d.candidates <- masqueradeFrom(arr[r])
+			d.candidates <- masquerade{Masquerade: *arr[r]}
 		}
 	}
 }
 
 // Vet vets the specified Masquerade, verifying certificate using the given CertPool
 func Vet(m *Masquerade, pool *x509.CertPool) bool {
-	return vet(masqueradeFrom(m), pool)
+	return vet(m, pool)
 }
 
-func vet(m *masquerade, pool *x509.CertPool) bool {
+func vet(m *Masquerade, pool *x509.CertPool) bool {
 	d := &direct{
 		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
@@ -260,8 +259,8 @@ func (d *direct) dial() (net.Conn, func(bool) bool, error) {
 	return conn, masqueradeGood, err
 }
 
-func (d *direct) dialWith(in chan *masquerade) (net.Conn, func(bool) bool, bool, error) {
-	retryLater := make([]*masquerade, 0)
+func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, error) {
+	retryLater := make([]masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
 			in <- m
@@ -269,7 +268,7 @@ func (d *direct) dialWith(in chan *masquerade) (net.Conn, func(bool) bool, bool,
 	}()
 
 	for {
-		var m *masquerade
+		var m masquerade
 		select {
 		case m = <-in:
 			log.Trace("Got vetted masquerade")
@@ -288,14 +287,12 @@ func (d *direct) dialWith(in chan *masquerade) (net.Conn, func(bool) bool, bool,
 		// We do the full TLS connection here because in practice the domains at a given IP
 		// address can change frequently on CDNs, so the certificate may not match what
 		// we expect.
-		conn, retriable, err := d.doDial(m)
+		conn, retriable, err := d.doDial(&m.Masquerade)
 		if err == nil {
 			log.Trace("Returning connection")
 			masqueradeGood := func(good bool) bool {
 				if good {
-					d.mx.Lock()
 					m.LastVetted = time.Now()
-					d.mx.Unlock()
 					// Requeue the working connection to masquerades
 					d.masquerades <- m
 					select {
@@ -317,7 +314,7 @@ func (d *direct) dialWith(in chan *masquerade) (net.Conn, func(bool) bool, bool,
 	}
 }
 
-func (d *direct) doDial(m *masquerade) (conn net.Conn, retriable bool, err error) {
+func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
 	conn, err = d.dialServerWith(m)
 	if err != nil {
 		log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
@@ -343,7 +340,7 @@ func (d *direct) doDial(m *masquerade) (conn net.Conn, retriable bool, err error
 	return
 }
 
-func (d *direct) dialServerWith(m *masquerade) (net.Conn, error) {
+func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	tlsConfig := d.tlsConfig(m)
 	dialTimeout := 10 * time.Second
 	sendServerNameExtension := false
@@ -365,7 +362,7 @@ func (d *direct) dialServerWith(m *masquerade) (net.Conn, error) {
 // tlsConfig builds a tls.Config for dialing the upstream host. Constructed
 // tls.Configs are cached on a per-masquerade basis to enable client session
 // caching and reduce the amount of PEM certificate parsing.
-func (d *direct) tlsConfig(m *masquerade) *tls.Config {
+func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
 	d.tlsConfigsMutex.Lock()
 	defer d.tlsConfigsMutex.Unlock()
 
