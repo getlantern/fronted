@@ -202,12 +202,15 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
-func NewDirect(timeout time.Duration) http.RoundTripper {
+// If it can't obtain a working masquerade within the given timeout, it will
+// return nil/false.
+func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
 	instance, ok := _instance.Get(timeout)
 	if !ok {
-		panic(fmt.Errorf("No DirectHttpClient available within %v", timeout))
+		log.Errorf("No DirectHttpClient available within %v", timeout)
+		return nil, false
 	}
-	return instance.(http.RoundTripper)
+	return instance.(http.RoundTripper), true
 }
 
 // Do continually retries a given request until it succeeds because some
