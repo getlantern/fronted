@@ -26,12 +26,21 @@ func TestDirectDomainFronting(t *testing.T) {
 
 func doTestDomainFronting(t *testing.T, cacheFile string) {
 	ConfigureCachingForTest(t, cacheFile)
+	direct, ok := NewDirect(30 * time.Second)
+	if !assert.True(t, ok) {
+		return
+	}
 	client := &http.Client{
-		Transport: NewDirect(30 * time.Second),
+		Transport: direct,
 	}
 	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, testURL))
+
+	direct, ok = NewDirect(30 * time.Second)
+	if !assert.True(t, ok) {
+		return
+	}
 	client = &http.Client{
-		Transport: NewDirect(30 * time.Second),
+		Transport: direct,
 	}
 	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, "http://d2wi0vwulmtn99.cloudfront.net/proxies.yaml.gz"))
 }
