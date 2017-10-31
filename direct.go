@@ -21,11 +21,10 @@ import (
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer"
-	"github.com/getlantern/uuid"
 )
 
 const (
-	numberToVetInitially       = 10
+	numberToVetInitially       = 100
 	defaultMaxAllowedCachedAge = 24 * time.Hour
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
@@ -212,16 +211,6 @@ func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
 		return nil, false
 	}
 	return instance.(http.RoundTripper), true
-}
-
-// NewProxyingAt returns a RoundTripper that proxies requests via the proxy at
-// the given proxyHost.
-func NewProxyingAt(proxyHost string, timeout time.Duration) (http.RoundTripper, bool) {
-	direct, ok := NewDirect(timeout)
-	if !ok {
-		return direct, ok
-	}
-	return &proxyingRoundTripper{RoundTripper: direct, proxyHost: proxyHost}, true
 }
 
 // Do continually retries a given request until it succeeds because some
@@ -433,22 +422,4 @@ func (ddf *directTransport) RoundTrip(req *http.Request) (resp *http.Response, e
 	*norm.URL = *req.URL
 	norm.URL.Scheme = "http"
 	return ddf.Transport.RoundTrip(norm)
-}
-
-type proxyingRoundTripper struct {
-	http.RoundTripper
-	proxyHost string
-}
-
-func (prt *proxyingRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	// Set custom headers for domain-fronted proxying
-	req.Header.Set("X-DDF-Scheme", req.URL.Scheme)
-	req.Header.Set("X-DDF-Host", req.Host)
-	// Set a unique request-id just to make sure we bust the cache
-	req.Header.Set("X-DDF-Request-Id", uuid.NewRandom().String())
-	req.URL.Scheme = "http"
-	req.URL.Host = prt.proxyHost
-	req.Host = prt.proxyHost
-
-	return prt.RoundTripper.RoundTrip(req)
 }
