@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getlantern/proxy"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,7 +25,7 @@ func TestProxying(t *testing.T) {
 	cacheFile := filepath.Join(dir, "cachefile.3")
 	ConfigureCachingForTest(t, cacheFile)
 
-	conn, err := DialTimeout(30 * time.Second)
+	conn, err := DialTimeout("d100fjyl3713ch.cloudfront.net", 30*time.Second)
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -32,12 +33,12 @@ func TestProxying(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodGet, "https://www.google.com/humans.txt", nil)
 	req.Header.Set("X-Lantern-Auth-Token", "pj6mWPafKzP26KZvUf7FIs24eB2ubjUKFvXktodqgUzZULhGeRUT0mwhyHb9jY2b")
-	PrepareForProxyingVia("d100fjyl3713ch.cloudfront.net", req)
+	conn.(proxy.RequestAware).OnRequest(req)
 	resp, err := httpTransport(conn, clientSessionCache).RoundTrip(req)
 	if !assert.NoError(t, err) {
 		return
 	}
-	AfterProxying(conn, req, resp, err)
+	conn.(proxy.ResponseAware).OnResponse(req, resp, err)
 	if !assert.Equal(t, http.StatusOK, resp.StatusCode) {
 		return
 	}
