@@ -61,7 +61,6 @@ func (conn *proxyingConn) OnRequest(req *http.Request) {
 
 // OnResponse implements the proxy.ResponseAware interface
 func (conn *proxyingConn) OnResponse(req *http.Request, resp *http.Response, err error) {
-	resp.Close = true
 	if conn.masqueradeGood == nil {
 		return
 	}
