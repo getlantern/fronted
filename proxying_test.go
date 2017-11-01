@@ -25,14 +25,15 @@ func TestProxying(t *testing.T) {
 	cacheFile := filepath.Join(dir, "cachefile.3")
 	ConfigureCachingForTest(t, cacheFile)
 
-	conn, err := DialTimeout("d100fjyl3713ch.cloudfront.net", 30*time.Second)
+	conn, err := DialTimeout("d100fjyl3713ch.cloudfront.net", 30*time.Second, func(req *http.Request) {
+		req.Header.Set("X-Lantern-Auth-Token", "pj6mWPafKzP26KZvUf7FIs24eB2ubjUKFvXktodqgUzZULhGeRUT0mwhyHb9jY2b")
+	})
 	if !assert.NoError(t, err) {
 		return
 	}
 	defer conn.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, "https://www.google.com/humans.txt", nil)
-	req.Header.Set("X-Lantern-Auth-Token", "pj6mWPafKzP26KZvUf7FIs24eB2ubjUKFvXktodqgUzZULhGeRUT0mwhyHb9jY2b")
 	conn.(proxy.RequestAware).OnRequest(req)
 	resp, err := httpTransport(conn, clientSessionCache).RoundTrip(req)
 	if !assert.NoError(t, err) {

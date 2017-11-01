@@ -8,8 +8,9 @@ import (
 	"github.com/getlantern/uuid"
 )
 
-// DialTimeout dials out using masquerading
-func DialTimeout(proxyHost string, timeout time.Duration) (net.Conn, error) {
+// DialTimeout dials out using masquerading, proxying via the given proxyHost
+// and optionally notifying onRequest for each proxied request.
+func DialTimeout(proxyHost string, timeout time.Duration, onRequest func(*http.Request)) (net.Conn, error) {
 	_d, ok := _instance.Get(timeout)
 	if !ok {
 		return nil, dialError("Timeout waiting for masquerade")
@@ -17,7 +18,10 @@ func DialTimeout(proxyHost string, timeout time.Duration) (net.Conn, error) {
 	d := _d.(*direct)
 	// TODO: apply timeout to dial here too
 	conn, masqueradeGood, err := d.dial()
-	return &proxyingConn{Conn: conn, proxyHost: proxyHost, masqueradeGood: masqueradeGood}, err
+	if onRequest == nil {
+		onRequest = func(*http.Request) {}
+	}
+	return &proxyingConn{Conn: conn, proxyHost: proxyHost, onRequest: onRequest, masqueradeGood: masqueradeGood}, err
 }
 
 type dialError string
@@ -37,12 +41,14 @@ func (e dialError) Temporary() bool {
 type proxyingConn struct {
 	net.Conn
 	proxyHost      string
+	onRequest      func(*http.Request)
 	masqueradeGood func(bool) bool
 }
 
 // OnRequest implements the proxy.RequestAware interface to prepare the domain-
 // fronted request.
 func (conn *proxyingConn) OnRequest(req *http.Request) {
+	conn.onRequest(req)
 	if req.URL.Scheme == "" {
 		// HTTPS requests had their scheme stripped, add it back
 		req.URL.Scheme = "https"
