@@ -225,7 +225,14 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, fmt.Errorf("Unable to read request body: %v", err)
 		}
 	}
-	for i := 0; i < maxTries; i++ {
+
+	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
+	tries := 1
+	if isIdempotent {
+		tries = maxTries
+	}
+
+	for i := 0; i < tries; i++ {
 		if body != nil {
 			req.Body = ioutil.NopCloser(bytes.NewReader(body))
 		}
