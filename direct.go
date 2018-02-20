@@ -216,9 +216,11 @@ func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
 // Do continually retries a given request until it succeeds because some
 // fronting providers will return a 403 for some domains.
 func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
+	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
+
 	var body []byte
 	var err error
-	if req.Body != nil {
+	if isIdempotent && req.Body != nil {
 		// store body in-memory to be able to replay it if necessary
 		body, err = ioutil.ReadAll(req.Body)
 		if err != nil {
@@ -226,16 +228,28 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
+	getBody := func() io.ReadCloser {
+		if req.Body == nil {
+			return nil
+		}
+
+		if !isIdempotent {
+			return req.Body
+		}
+		return ioutil.NopCloser(bytes.NewReader(body))
+	}
+
 	tries := 1
 	if isIdempotent {
 		tries = maxTries
 	}
 
 	for i := 0; i < tries; i++ {
-		if body != nil {
-			req.Body = ioutil.NopCloser(bytes.NewReader(body))
+		if i > 0 {
+			log.Debugf("Retrying domain-fronted request, pass %d", i)
 		}
+
+		req.Body = getBody()
 		conn, masqueradeGood, err := d.dial()
 		if err != nil {
 			// unable to find good masquerade, fail
@@ -244,7 +258,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		tr := httpTransport(conn, clientSessionCache)
 		resp, err := tr.RoundTrip(req)
 		if err != nil {
-			log.Errorf("Could not complete request %v", err)
+			log.Debugf("Could not complete request %v", err)
 			masqueradeGood(false)
 			continue
 		}
@@ -252,6 +266,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			masqueradeGood(true)
 			return resp, nil
 		}
+		log.Debugf("Could not complete request due to response status: %v", resp.Status)
 		resp.Body.Close()
 		masqueradeGood(false)
 	}
