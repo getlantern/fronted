@@ -245,6 +245,10 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	for i := 0; i < tries; i++ {
+		if i > 0 {
+			log.Debugf("Retrying domain-fronted request, pass %d", i)
+		}
+
 		req.Body = getBody()
 		conn, masqueradeGood, err := d.dial()
 		if err != nil {
@@ -254,16 +258,20 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		tr := httpTransport(conn, clientSessionCache)
 		resp, err := tr.RoundTrip(req)
 		if err != nil {
-			log.Errorf("Could not complete request %v", err)
+			log.Debugf("Could not complete request %v", err)
 			masqueradeGood(false)
 			continue
 		}
-		if resp.StatusCode != http.StatusForbidden {
-			masqueradeGood(true)
-			return resp, nil
+
+		if resp.StatusCode == http.StatusForbidden {
+			log.Debugf("Could not complete request due to response status: %v", resp.Status)
+			resp.Body.Close()
+			masqueradeGood(false)
+			continue
 		}
-		resp.Body.Close()
-		masqueradeGood(false)
+
+		masqueradeGood(true)
+		return resp, nil
 	}
 
 	return nil, errors.New("Could not complete request even with retries")
