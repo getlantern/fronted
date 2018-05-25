@@ -68,9 +68,12 @@ func TestLoadCandidates(t *testing.T) {
 	close(d.candidates)
 
 	actual := make(map[Masquerade]bool)
+	count := 0
 	for m := range d.candidates {
 		actual[Masquerade{m.Domain, m.IpAddress}] = true
+		count++
 	}
 
+	assert.Equal(t, len(DefaultCloudfrontMasquerades), count, "Unexpected number of candidates")
 	assert.Equal(t, expected, actual, "Masquerades did not load as expected")
 }
