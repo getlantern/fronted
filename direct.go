@@ -110,6 +110,7 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 			r := i + rand.Intn(size-i)
 			log.Trace("Adding candidate")
 			d.candidates <- masquerade{Masquerade: *arr[r]}
+			arr[i], arr[r] = arr[r], arr[i]
 		}
 	}
 }
