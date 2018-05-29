@@ -105,11 +105,19 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 	for key, arr := range initial {
 		size := len(arr)
 		log.Tracef("Adding %d candidates for %v", size, key)
+
+		// make a shuffled copy of arr
+		// ('inside-out' Fisher-Yates)
+		sh := make([]*Masquerade, size)
 		for i := 0; i < size; i++ {
-			// choose index uniformly in [i, n-1]
-			r := i + rand.Intn(size-i)
+			j := rand.Intn(i + 1) // 0 <= j <= i
+			sh[i] = sh[j]
+			sh[j] = arr[i]
+		}
+
+		for _, c := range sh {
 			log.Trace("Adding candidate")
-			d.candidates <- masquerade{Masquerade: *arr[r]}
+			d.candidates <- masquerade{Masquerade: *c}
 		}
 	}
 }

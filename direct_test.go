@@ -54,3 +54,26 @@ func TestVet(t *testing.T) {
 	}
 	t.Fatal("None of the default masquerades vetted successfully")
 }
+
+func TestLoadCandidates(t *testing.T) {
+	expected := make(map[Masquerade]bool, len(DefaultCloudfrontMasquerades))
+	for _, m := range DefaultCloudfrontMasquerades {
+		expected[*m] = true
+	}
+
+	d := &direct{
+		candidates: make(chan masquerade, len(DefaultCloudfrontMasquerades)),
+	}
+	d.loadCandidates(map[string][]*Masquerade{"cloudfront": DefaultCloudfrontMasquerades})
+	close(d.candidates)
+
+	actual := make(map[Masquerade]bool)
+	count := 0
+	for m := range d.candidates {
+		actual[Masquerade{m.Domain, m.IpAddress}] = true
+		count++
+	}
+
+	assert.Equal(t, len(DefaultCloudfrontMasquerades), count, "Unexpected number of candidates")
+	assert.Equal(t, expected, actual, "Masquerades did not load as expected")
+}
