@@ -304,6 +304,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 			select {
 			case in <- m:
 			default:
+				log.Debug("Dropping masquerade: retry channel full")
 			}
 		}
 	}()
@@ -341,6 +342,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 						// ok
 					default:
 						// cache writing has fallen behind, drop masquerade
+						log.Debug("Dropping masquerade: cache writing is behind")
 					}
 				} else {
 					go d.vetOneUntilGood()
@@ -351,6 +353,8 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 			return conn, masqueradeGood, true, err
 		} else if retriable {
 			retryLater = append(retryLater, m)
+		} else {
+			log.Debugf("Dropping masquerade: non retryable error: %v", err)
 		}
 	}
 }
