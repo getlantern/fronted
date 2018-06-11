@@ -195,7 +195,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Tracef("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
+		log.Debugf("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
 		return false
 	}
 	if resp.Body != nil {
@@ -203,7 +203,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		resp.Body.Close()
 	}
 	if resp.StatusCode != expectedStatus {
-		log.Tracef("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		log.Debugf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
 		return false
 	}
 	return true
@@ -363,7 +363,7 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
 		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
-			log.Tracef("Not re-adding candidate that failed on error '%v'", err.Error())
+			log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
 			retriable = false
 		} else {
 			log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
