@@ -195,7 +195,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Tracef("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
+		log.Debugf("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
 		return false
 	}
 	if resp.Body != nil {
@@ -203,7 +203,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		resp.Body.Close()
 	}
 	if resp.StatusCode != expectedStatus {
-		log.Tracef("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		log.Debugf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
 		return false
 	}
 	return true
@@ -304,6 +304,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 			select {
 			case in <- m:
 			default:
+				log.Debug("Dropping masquerade: retry channel full")
 			}
 		}
 	}()
@@ -341,6 +342,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 						// ok
 					default:
 						// cache writing has fallen behind, drop masquerade
+						log.Debug("Dropping masquerade: cache writing is behind")
 					}
 				} else {
 					go d.vetOneUntilGood()
@@ -351,6 +353,8 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 			return conn, masqueradeGood, true, err
 		} else if retriable {
 			retryLater = append(retryLater, m)
+		} else {
+			log.Debugf("Dropping masquerade: non retryable error: %v", err)
 		}
 	}
 }
@@ -363,17 +367,17 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
 		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
-			log.Tracef("Not re-adding candidate that failed on error '%v'", err.Error())
+			log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
 			retriable = false
 		} else {
 			log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
 		}
 	} else {
-		log.Tracef("Got successful connection to: %v", m)
+		log.Debugf("Got successful connection to: %v", m)
 		idleTimeout := 70 * time.Second
 
-		log.Trace("Wrapping connecting in idletiming connection")
+		log.Debugf("Wrapping connection in idletiming connection: %v", m)
 		conn = idletiming.Conn(conn, idleTimeout, func() {
 			log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
 		})
