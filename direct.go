@@ -370,10 +370,10 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 			retriable = true
 		}
 	} else {
-		log.Tracef("Got successful connection to: %v", m)
+		log.Debugf("Got successful connection to: %v", m)
 		idleTimeout := 70 * time.Second
 
-		log.Trace("Wrapping connecting in idletiming connection")
+		log.Debugf("Wrapping connection in idletiming connection: %v", m)
 		conn = idletiming.Conn(conn, idleTimeout, func() {
 			log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
 		})
