@@ -29,7 +29,6 @@ const (
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
 	maxTries                   = 6
-	testURL                    = "http://d157vud77ygy87.cloudfront.net/ping" // borda
 )
 
 var (
@@ -51,23 +50,29 @@ type direct struct {
 	maxCacheSize        int
 	cacheSaveInterval   time.Duration
 	toCache             chan masquerade
+	defaultProviderID   string
+	providers           map[string]*Provider
+	ready               chan struct{}
+	readyOnce           sync.Once
 }
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
 // cache file for caching masquerades to set up direct domain fronting.
-func Configure(pool *x509.CertPool, masquerades map[string][]*Masquerade, cacheFile string) {
+// defaultProviderID is used when a masquerade without a provider is
+// encountered (eg in a cache file)
+func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) {
 	log.Trace("Configuring fronted")
-	if masquerades == nil || len(masquerades) == 0 {
-		log.Errorf("No masquerades!!")
+
+	if providers == nil || len(providers) == 0 {
+		log.Errorf("No fronted providers!!")
 		return
 	}
 
 	CloseCache()
 
-	// Make a copy of the masquerades to avoid data races.
 	size := 0
-	for _, v := range masquerades {
-		size += len(v)
+	for _, p := range providers {
+		size += len(p.Masquerades)
 	}
 
 	if size == 0 {
@@ -84,6 +89,14 @@ func Configure(pool *x509.CertPool, masquerades map[string][]*Masquerade, cacheF
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
 		toCache:             make(chan masquerade, defaultMaxCacheSize),
+		defaultProviderID:   defaultProviderID,
+		providers:           make(map[string]*Provider),
+		ready:               make(chan struct{}),
+	}
+
+	// copy providers
+	for k, p := range providers {
+		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades)
 	}
 
 	numberToVet := numberToVetInitially
@@ -91,18 +104,20 @@ func Configure(pool *x509.CertPool, masquerades map[string][]*Masquerade, cacheF
 		numberToVet -= d.initCaching(cacheFile)
 	}
 
-	d.loadCandidates(masquerades)
+	d.loadCandidates(d.providers)
 	if numberToVet > 0 {
 		d.vet(numberToVet)
 	} else {
 		log.Debug("Not vetting any masquerades because we have enough cached ones")
+		d.signalReady()
 	}
 	_instance.Set(d)
 }
 
-func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
+func (d *direct) loadCandidates(initial map[string]*Provider) {
 	log.Debug("Loading candidates")
-	for key, arr := range initial {
+	for key, p := range initial {
+		arr := p.Masquerades
 		size := len(arr)
 		log.Tracef("Adding %d candidates for %v", size, key)
 
@@ -117,17 +132,31 @@ func (d *direct) loadCandidates(initial map[string][]*Masquerade) {
 
 		for _, c := range sh {
 			log.Trace("Adding candidate")
-			d.candidates <- masquerade{Masquerade: *c}
+			d.candidates <- masquerade{Masquerade: *c, ProviderID: key}
 		}
 	}
 }
 
-// Vet vets the specified Masquerade, verifying certificate using the given CertPool
-func Vet(m *Masquerade, pool *x509.CertPool) bool {
-	return vet(m, pool)
+func (d *direct) signalReady() {
+	d.readyOnce.Do(func() {
+		close(d.ready)
+	})
 }
 
-func vet(m *Masquerade, pool *x509.CertPool) bool {
+func (d *direct) providerFor(m *masquerade) *Provider {
+	pid := m.ProviderID
+	if pid == "" {
+		pid = d.defaultProviderID
+	}
+	return d.providers[pid]
+}
+
+// Vet vets the specified Masquerade, verifying certificate using the given CertPool
+func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
+	return vet(m, pool, testURL)
+}
+
+func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	d := &direct{
 		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
@@ -139,7 +168,7 @@ func vet(m *Masquerade, pool *x509.CertPool) bool {
 		return false
 	}
 	defer conn.Close()
-	return postCheck(conn)
+	return postCheck(conn, testURL)
 }
 
 func (d *direct) vet(numberToVet int) {
@@ -161,22 +190,32 @@ func (d *direct) vetOne() bool {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
 	log.Trace("Vetting one")
-	conn, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates)
+	conn, m, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates)
 	if err != nil {
 		return masqueradesRemain
 	}
 	defer conn.Close()
 
-	if !masqueradeGood(postCheck(conn)) {
+	provider := d.providerFor(m)
+	if provider == nil {
+		log.Tracef("Skipping masquerade with disabled/unknown provider id '%s'", m.ProviderID)
+		return masqueradesRemain
+	}
+
+	if !masqueradeGood(postCheck(conn, provider.TestURL)) {
 		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade")
 		return masqueradesRemain
 	}
+
 	log.Trace("Finished vetting one")
+	// signal that at least one
+	// masquerade has been vetted successfully.
+	d.signalReady()
 	return false
 }
 
 // postCheck does a post with invalid data to verify domain-fronting works
-func postCheck(conn net.Conn) bool {
+func postCheck(conn net.Conn, testURL string) bool {
 	client := &http.Client{
 		Transport: httpTransport(conn, nil),
 	}
@@ -213,18 +252,30 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 // If it can't obtain a working masquerade within the given timeout, it will
 // return nil/false.
 func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
+	start := time.Now()
 	instance, ok := _instance.Get(timeout)
 	if !ok {
 		log.Errorf("No DirectHttpClient available within %v", timeout)
 		return nil, false
 	}
-	return instance.(http.RoundTripper), true
+	remaining := timeout - time.Since(start)
+
+	// Wait to be signalled that at least one masquerade has been vetted...
+	select {
+	case <-instance.(*direct).ready:
+		return instance.(http.RoundTripper), true
+	case <-time.After(remaining):
+		log.Errorf("No DirectHttpClient available within %v", timeout)
+		return nil, false
+	}
 }
 
 // Do continually retries a given request until it succeeds because some
 // fronting providers will return a 403 for some domains.
 func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
+
+	originHost := req.URL.Host
 
 	var body []byte
 	var err error
@@ -257,14 +308,34 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			log.Debugf("Retrying domain-fronted request, pass %d", i)
 		}
 
-		req.Body = getBody()
-		conn, masqueradeGood, err := d.dial()
+		conn, m, masqueradeGood, err := d.dial()
 		if err != nil {
 			// unable to find good masquerade, fail
 			return nil, err
 		}
+		provider := d.providerFor(m)
+		if provider == nil {
+			log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", m.ProviderID)
+			masqueradeGood(false)
+			continue
+		}
+		frontedHost := provider.Lookup(originHost)
+		if frontedHost == "" {
+			log.Debugf("Not translating unknown origin %s...", originHost)
+			frontedHost = originHost
+		} else {
+			log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
+		}
+
+		reqi, err := cloneRequestWith(req, frontedHost, getBody())
+		if err != nil {
+			log.Errorf("Failed to copy http request?")
+			masqueradeGood(true)
+			continue
+		}
+
 		tr := httpTransport(conn, clientSessionCache)
-		resp, err := tr.RoundTrip(req)
+		resp, err := tr.RoundTrip(reqi)
 		if err != nil {
 			log.Debugf("Could not complete request %v", err)
 			masqueradeGood(false)
@@ -285,17 +356,35 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 	return nil, errors.New("Could not complete request even with retries")
 }
 
+func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
+	url := *req.URL
+	url.Host = frontedHost
+	r, err := http.NewRequest(req.Method, url.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, vs := range req.Header {
+		if !strings.EqualFold(k, "Host") {
+			v := make([]string, len(vs))
+			copy(vs, v)
+			r.Header[k] = v
+		}
+	}
+	return r, nil
+}
+
 // Dial dials out using a masquerade. If the available masquerade fails, it
 // retries with others until it either succeeds or exhausts the available
 // masquerades. If successful, it returns a function that the caller can use to
 // tell us whether the masquerade is good or not (i.e. if masquerade was good,
 // keep it, else vet a new one).
-func (d *direct) dial() (net.Conn, func(bool) bool, error) {
-	conn, masqueradeGood, _, err := d.dialWith(d.masquerades)
-	return conn, masqueradeGood, err
+func (d *direct) dial() (net.Conn, *masquerade, func(bool) bool, error) {
+	conn, m, masqueradeGood, _, err := d.dialWith(d.masquerades)
+	return conn, m, masqueradeGood, err
 }
 
-func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, error) {
+func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool) bool, bool, error) {
 	retryLater := make([]masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
@@ -320,7 +409,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 			case m = <-d.candidates:
 				log.Trace("Got unvetted masquerade")
 			default:
-				return nil, nil, false, errors.New("Could not dial any masquerade?")
+				return nil, nil, nil, false, errors.New("Could not dial any masquerade?")
 			}
 		}
 
@@ -350,7 +439,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, func(bool) bool, bool, 
 
 				return good
 			}
-			return conn, masqueradeGood, true, err
+			return conn, &m, masqueradeGood, true, err
 		} else if retriable {
 			retryLater = append(retryLater, m)
 		} else {
@@ -389,12 +478,16 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	tlsConfig := d.tlsConfig(m)
 	dialTimeout := 10 * time.Second
 	sendServerNameExtension := false
+	addr := m.IpAddress
+	if strings.IndexByte(addr, ':') == -1 {
+		addr = addr + ":443"
+	}
 
 	conn, err := tlsdialer.DialTimeout(
 		netx.DialTimeout,
 		dialTimeout,
 		"tcp",
-		m.IpAddress+":443",
+		addr,
 		sendServerNameExtension, // SNI or no
 		tlsConfig)
 

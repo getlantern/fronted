@@ -32,9 +32,9 @@ func TestCaching(t *testing.T) {
 	}
 
 	now := time.Now()
-	ma := masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now}
-	mb := masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now}
-	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now}
+	ma := masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now, testProviderID}
+	mb := masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now, testProviderID}
+	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now, testProviderID}
 
 	d := makeDirect()
 	d.toCache <- ma
