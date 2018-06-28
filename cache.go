@@ -40,6 +40,12 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 				if m.ProviderID == "" {
 					m.ProviderID = d.defaultProviderID
 				}
+				// Skip entries for providers that are not configured.
+				_, ok := d.providers[m.ProviderID]
+				if !ok {
+					log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
+					continue
+				}
 				select {
 				case d.masquerades <- m:
 					// submitted

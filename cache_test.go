@@ -23,9 +23,11 @@ func TestCaching(t *testing.T) {
 			candidates:          make(chan masquerade, 1000),
 			masquerades:         make(chan masquerade, 1000),
 			maxAllowedCachedAge: 250 * time.Millisecond,
-			maxCacheSize:        2,
+			maxCacheSize:        3,
 			cacheSaveInterval:   50 * time.Millisecond,
 			toCache:             make(chan masquerade, 1000),
+			providers:           testProviders(),
+			defaultProviderID:   testProviderID,
 		}
 		go d.fillCache(make([]masquerade, 0), cacheFile)
 		return d
@@ -34,12 +36,14 @@ func TestCaching(t *testing.T) {
 	now := time.Now()
 	ma := masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now, testProviderID}
 	mb := masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now, testProviderID}
-	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now, testProviderID}
+	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now, ""}         // defaulted
+	md := masquerade{Masquerade{Domain: "d", IpAddress: "4"}, now, "sadcloud"} // skipped
 
 	d := makeDirect()
 	d.toCache <- ma
 	d.toCache <- mb
 	d.toCache <- mc
+	d.toCache <- md
 
 	readMasquerades := func() []masquerade {
 		var result []masquerade

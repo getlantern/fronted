@@ -321,10 +321,10 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		frontedHost := provider.Lookup(originHost)
 		if frontedHost == "" {
-			log.Debugf("Not translating unknown origin %s...", originHost)
+			log.Tracef("Not translating unknown origin %s...", originHost)
 			frontedHost = originHost
 		} else {
-			log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
+			log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 		}
 
 		reqi, err := cloneRequestWith(req, frontedHost, getBody())
