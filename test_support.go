@@ -27,6 +27,12 @@ func ConfigureCachingForTest(t *testing.T, cacheFile string) {
 	Configure(certs, p, testProviderID, cacheFile)
 }
 
+func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) {
+	certs := trustedCACerts(t)
+	p := testProvidersWithHosts(hosts)
+	Configure(certs, p, testProviderID, "")
+}
+
 func trustedCACerts(t *testing.T) *x509.CertPool {
 	certs := make([]string, 0, len(DefaultTrustedCAs))
 	for _, ca := range DefaultTrustedCAs {
@@ -43,5 +49,11 @@ func trustedCACerts(t *testing.T) *x509.CertPool {
 func testProviders() map[string]*Provider {
 	return map[string]*Provider{
 		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades),
+	}
+}
+
+func testProvidersWithHosts(hosts map[string]string) map[string]*Provider {
+	return map[string]*Provider{
+		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades),
 	}
 }
