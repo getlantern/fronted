@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +34,28 @@ func TestDirectDomainFronting(t *testing.T) {
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string) {
-	ConfigureCachingForTest(t, cacheFile)
+
+	getURL := "http://config.example.com/proxies.yaml.gz"
+	getHost := "config.example.com"
+	getFrontedHost := "d2wi0vwulmtn99.cloudfront.net"
+
+	pingHost := "ping.example.com"
+	pu, err := url.Parse(pingTestURL)
+	if !assert.NoError(t, err) {
+		return
+	}
+	pingFrontedHost := pu.Hostname()
+	pu.Host = pingHost
+	pingURL := pu.String()
+
+	hosts := map[string]string{
+		pingHost: pingFrontedHost,
+		getHost:  getFrontedHost,
+	}
+	certs := trustedCACerts(t)
+	p := testProvidersWithHosts(hosts)
+	Configure(certs, p, testProviderID, cacheFile)
+
 	direct, ok := NewDirect(30 * time.Second)
 	if !assert.True(t, ok) {
 		return
@@ -40,7 +63,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client := &http.Client{
 		Transport: direct,
 	}
-	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingTestURL))
+	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
 	direct, ok = NewDirect(30 * time.Second)
 	if !assert.True(t, ok) {
@@ -49,7 +72,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	client = &http.Client{
 		Transport: direct,
 	}
-	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, getTestURL))
+	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
 }
 
 func TestVet(t *testing.T) {
@@ -92,41 +115,67 @@ func TestLoadCandidates(t *testing.T) {
 
 func TestHostAliasesBasic(t *testing.T) {
 
+	headersIn := map[string][]string{
+		"X-Foo-Bar": []string{"Quux", "Baz"},
+		"X-Bar-Foo": []string{"XYZ"},
+		"X-Quux":    []string{""},
+	}
+	headersOut := map[string][]string{
+		"X-Foo-Bar":       []string{"Quux", "Baz"},
+		"X-Bar-Foo":       []string{"XYZ"},
+		"X-Quux":          []string{""},
+		"Connection":      []string{"close"},
+		"User-Agent":      []string{"Go-http-client/1.1"},
+		"Accept-Encoding": []string{"gzip"},
+	}
+
 	tests := []struct {
 		url            string
+		headers        map[string][]string
 		expectedResult CDNResult
 		expectedStatus int
 	}{
 		{
 			"http://abc.forbidden.com/foo/bar",
-			CDNResult{"abc.cloudsack.biz", "/foo/bar", "", "cloudsack"},
+			headersIn,
+			CDNResult{"abc.cloudsack.biz", "/foo/bar", "", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
 		{
 			"https://abc.forbidden.com/bar?x=y&z=w",
-			CDNResult{"abc.cloudsack.biz", "/bar", "x=y&z=w", "cloudsack"},
+			headersIn,
+			CDNResult{"abc.cloudsack.biz", "/bar", "x=y&z=w", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
 		{
-			"http://def.forbidden.com/foo",
-			CDNResult{"def.cloudsack.biz", "/foo", "", "cloudsack"},
+			"http://def.forbidden.com:12345/foo",
+			headersIn,
+			CDNResult{"def.cloudsack.biz", "/foo", "", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
 		{
 			"https://def.forbidden.com/bar?x=y&z=w",
-			CDNResult{"def.cloudsack.biz", "/bar", "x=y&z=w", "cloudsack"},
+			headersIn,
+			CDNResult{"def.cloudsack.biz", "/bar", "x=y&z=w", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
-		// not translated, but permitted
+	}
+
+	errtests := []struct {
+		url           string
+		expectedError string
+	}{
 		{
 			"http://fff.cloudsack.biz/foo",
-			CDNResult{"fff.cloudsack.biz", "/foo", "", "cloudsack"},
-			http.StatusAccepted,
+			"Get http://fff.cloudsack.biz/foo: No alias for host fff.cloudsack.biz",
 		},
 		{
-			"http://fff.cloudsack.biz/bar?x=y&z=w",
-			CDNResult{"fff.cloudsack.biz", "/bar", "x=y&z=w", "cloudsack"},
-			http.StatusAccepted,
+			"http://fff.cloudsack.biz:1234/bar?x=y&z=w",
+			"Get http://fff.cloudsack.biz:1234/bar?x=y&z=w: No alias for host fff.cloudsack.biz",
+		},
+		{
+			"https://www.google.com",
+			"Get https://www.google.com: No alias for host www.google.com",
 		},
 	}
 
@@ -141,7 +190,7 @@ func TestHostAliasesBasic(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq)
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -153,7 +202,15 @@ func TestHostAliasesBasic(t *testing.T) {
 	}
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
-		resp, err := client.Get(test.url)
+		req, err := http.NewRequest(http.MethodGet, test.url, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		for k, v := range test.headers {
+			req.Header[k] = v
+		}
+		resp, err := client.Do(req)
 		if !assert.NoError(t, err, "Request %s failed", test.url) {
 			continue
 		}
@@ -175,10 +232,12 @@ func TestHostAliasesBasic(t *testing.T) {
 		assert.Equal(t, test.expectedResult, result)
 	}
 
-	// this is not allowed, so masqurades are discarded and
-	// an error results...
-	_, err = client.Get("https://example.biz/baz")
-	assert.NotNil(t, err)
+	for _, test := range errtests {
+		resp, err := client.Get(test.url)
+		assert.EqualError(t, err, test.expectedError)
+		assert.Nil(t, resp)
+
+	}
 }
 
 func TestHostAliasesMulti(t *testing.T) {
@@ -229,14 +288,14 @@ func TestHostAliasesMulti(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1)
+	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil)
 
 	masq2 := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
 	}
-	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2)
+	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -289,8 +348,140 @@ func TestHostAliasesMulti(t *testing.T) {
 	assert.True(t, providerCounts["sadcloud"] > 1)
 }
 
+func TestCustomValidators(t *testing.T) {
+
+	sadCloud, sadCloudAddr, err := newCDN("sadcloud", "sadcloud.io")
+	if !assert.NoError(t, err, "failed to start sadcloud cdn") {
+		return
+	}
+	defer sadCloud.Close()
+
+	sadCloudCodes := []int{http.StatusPaymentRequired, http.StatusTeapot, http.StatusBadGateway}
+	sadCloudValidator := NewStatusCodeValidator(sadCloudCodes)
+	testURL := "https://abc.forbidden.com/quux"
+
+	setup := func(validator ResponseValidator) {
+		masq := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: sadCloudAddr}}
+		alias := map[string]string{
+			"abc.forbidden.com": "abc.sadcloud.io",
+		}
+		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator)
+
+		certs := x509.NewCertPool()
+		certs.AddCert(sadCloud.Certificate())
+
+		providers := map[string]*Provider{
+			"sadcloud": p,
+		}
+
+		Configure(certs, providers, "sadcloud", "")
+	}
+
+	// This error indicates that the validator has discarded all masquerades.
+	// Each test starts with one masquerade, which is vetted during the
+	// call to NewDirect.
+	masqueradesExhausted := fmt.Sprintf("Get %s: Could not dial any masquerade?", testURL)
+
+	tests := []struct {
+		responseCode  int
+		validator     ResponseValidator
+		expectedError string
+	}{
+		// with the default validator, only 403s are rejected
+		{
+			responseCode:  http.StatusForbidden,
+			validator:     nil,
+			expectedError: masqueradesExhausted,
+		},
+		{
+			responseCode:  http.StatusAccepted,
+			validator:     nil,
+			expectedError: "",
+		},
+		{
+			responseCode:  http.StatusPaymentRequired,
+			validator:     nil,
+			expectedError: "",
+		},
+		{
+			responseCode:  http.StatusTeapot,
+			validator:     nil,
+			expectedError: "",
+		},
+		{
+			responseCode:  http.StatusBadGateway,
+			validator:     nil,
+			expectedError: "",
+		},
+
+		// with the custom validator, 403 is allowed, listed codes are rejected
+		{
+			responseCode:  http.StatusForbidden,
+			validator:     sadCloudValidator,
+			expectedError: "",
+		},
+		{
+			responseCode:  http.StatusAccepted,
+			validator:     sadCloudValidator,
+			expectedError: "",
+		},
+		{
+			responseCode:  http.StatusPaymentRequired,
+			validator:     sadCloudValidator,
+			expectedError: masqueradesExhausted,
+		},
+		{
+			responseCode:  http.StatusTeapot,
+			validator:     sadCloudValidator,
+			expectedError: masqueradesExhausted,
+		},
+		{
+			responseCode:  http.StatusBadGateway,
+			validator:     sadCloudValidator,
+			expectedError: masqueradesExhausted,
+		},
+	}
+
+	for _, test := range tests {
+		setup(test.validator)
+		direct, ok := NewDirect(1 * time.Second)
+		if !assert.True(t, ok) {
+			return
+		}
+		client := &http.Client{
+			Transport: direct,
+		}
+
+		req, err := http.NewRequest(http.MethodGet, testURL, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		if test.responseCode != http.StatusAccepted {
+			val := strconv.Itoa(test.responseCode)
+			log.Debugf("requesting forced response code %s", val)
+			req.Header.Set(CDNForceFail, val)
+		}
+
+		res, err := client.Do(req)
+		if test.expectedError == "" {
+			if !assert.Nil(t, err) {
+				continue
+			}
+			assert.Equal(t, test.responseCode, res.StatusCode, "Failed to force response status code")
+		} else {
+			assert.EqualError(t, err, test.expectedError)
+		}
+	}
+}
+
+const (
+	// set this header to an integer to force response status code
+	CDNForceFail = "X-CDN-Force-Fail"
+)
+
 type CDNResult struct {
 	Host, Path, Query, Provider string
+	Headers                     map[string][]string
 }
 
 func newCDN(providerID, domain string) (*httptest.Server, string, error) {
@@ -304,19 +495,31 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 				log.Debugf("(%s) CDN Request: %s", domain, dump)
 			}
 
+			forceFail := req.Header.Get(CDNForceFail)
+
 			vhost := req.Host
-			if strings.HasSuffix(vhost, allowedSuffix) {
+			if strings.HasSuffix(vhost, allowedSuffix) && forceFail == "" {
+				log.Debugf("accepting request host=%s ff=%s", vhost, forceFail)
 				body, _ := json.Marshal(&CDNResult{
 					Host:     vhost,
 					Path:     req.URL.Path,
 					Query:    req.URL.RawQuery,
 					Provider: providerID,
+					Headers:  req.Header,
 				})
 				rw.WriteHeader(http.StatusAccepted)
 				rw.Write(body)
 			} else {
-				log.Debugf("(%s) Rejecting request with host = %q", domain, vhost)
-				rw.WriteHeader(http.StatusForbidden)
+				log.Debugf("(%s) Rejecting request with host = %q ff=%s allowed=%s", domain, vhost, forceFail, allowedSuffix)
+				errorCode := http.StatusForbidden
+				if forceFail != "" {
+					errorCode, err = strconv.Atoi(forceFail)
+					if err != nil {
+						errorCode = http.StatusInternalServerError
+					}
+					log.Debugf("Forcing status code to %d", errorCode)
+				}
+				rw.WriteHeader(errorCode)
 			}
 		}))
 	addr := srv.Listener.Addr().String()

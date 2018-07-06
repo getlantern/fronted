@@ -10,7 +10,6 @@ import (
 var (
 	testProviderID  = "cloudfront"
 	pingTestURL     = "http://d157vud77ygy87.cloudfront.net/ping"
-	getTestURL      = "http://d2wi0vwulmtn99.cloudfront.net/proxies.yaml.gz"
 	testHosts       = map[string]string(nil)
 	testMasquerades = DefaultCloudfrontMasquerades
 )
@@ -48,12 +47,12 @@ func trustedCACerts(t *testing.T) *x509.CertPool {
 
 func testProviders() map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades),
+		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades, nil),
 	}
 }
 
 func testProvidersWithHosts(hosts map[string]string) map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades),
+		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil),
 	}
 }

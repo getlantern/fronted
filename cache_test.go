@@ -18,6 +18,13 @@ func TestCaching(t *testing.T) {
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.1")
 
+	cloudsackID := "cloudsack"
+
+	providers := map[string]*Provider{
+		testProviderID: NewProvider(nil, "", nil, nil),
+		cloudsackID:    NewProvider(nil, "", nil, nil),
+	}
+
 	makeDirect := func() *direct {
 		d := &direct{
 			candidates:          make(chan masquerade, 1000),
@@ -26,8 +33,8 @@ func TestCaching(t *testing.T) {
 			maxCacheSize:        3,
 			cacheSaveInterval:   50 * time.Millisecond,
 			toCache:             make(chan masquerade, 1000),
-			providers:           testProviders(),
-			defaultProviderID:   testProviderID,
+			providers:           providers,
+			defaultProviderID:   cloudsackID,
 		}
 		go d.fillCache(make([]masquerade, 0), cacheFile)
 		return d
@@ -70,8 +77,10 @@ func TestCaching(t *testing.T) {
 	assert.Len(t, masquerades, 2, "Wrong number of masquerades read")
 	assert.Equal(t, "b", masquerades[0].Domain, "Wrong masquerade at position 0")
 	assert.Equal(t, "2", masquerades[0].IpAddress, "Masquerade at position 0 has wrong IpAddress")
+	assert.Equal(t, testProviderID, masquerades[0].ProviderID, "Masquerade at position 0 has wrong ProviderID")
 	assert.Equal(t, "c", masquerades[1].Domain, "Wrong masquerade at position 0")
 	assert.Equal(t, "3", masquerades[1].IpAddress, "Masquerade at position 1 has wrong IpAddress")
+	assert.Equal(t, cloudsackID, masquerades[1].ProviderID, "Masquerade at position 1 has wrong ProviderID")
 	d.closeCache()
 
 	time.Sleep(d.maxAllowedCachedAge)

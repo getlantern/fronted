@@ -96,7 +96,7 @@ func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProvi
 
 	// copy providers
 	for k, p := range providers {
-		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades)
+		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator)
 	}
 
 	numberToVet := numberToVetInitially
@@ -275,7 +275,7 @@ func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
 func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
 
-	originHost := req.URL.Host
+	originHost := req.URL.Hostname()
 
 	var body []byte
 	var err error
@@ -321,8 +321,11 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		frontedHost := provider.Lookup(originHost)
 		if frontedHost == "" {
-			log.Tracef("Not translating unknown origin %s...", originHost)
-			frontedHost = originHost
+			// this error is not the masquerade's fault in particular
+			// so it is returned as good.
+			conn.Close()
+			masqueradeGood(true)
+			return nil, fmt.Errorf("No alias for host %s", originHost)
 		} else {
 			log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 		}
@@ -337,13 +340,14 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		tr := httpTransport(conn, clientSessionCache)
 		resp, err := tr.RoundTrip(reqi)
 		if err != nil {
-			log.Debugf("Could not complete request %v", err)
+			log.Debugf("Could not complete request: %v", err)
 			masqueradeGood(false)
 			continue
 		}
 
-		if resp.StatusCode == http.StatusForbidden {
-			log.Debugf("Could not complete request due to response status: %v", resp.Status)
+		err = provider.ValidateResponse(resp)
+		if err != nil {
+			log.Debugf("Could not complete request: %v", err)
 			resp.Body.Close()
 			masqueradeGood(false)
 			continue
@@ -367,7 +371,7 @@ func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser)
 	for k, vs := range req.Header {
 		if !strings.EqualFold(k, "Host") {
 			v := make([]string, len(vs))
-			copy(vs, v)
+			copy(v, vs)
 			r.Header[k] = v
 		}
 	}
@@ -376,7 +380,8 @@ func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser)
 
 // Dial dials out using a masquerade. If the available masquerade fails, it
 // retries with others until it either succeeds or exhausts the available
-// masquerades. If successful, it returns a function that the caller can use to
+// masquerades. If successful, it returns a connection to the masquerade,
+// the selected masquerade, and a function that the caller can use to
 // tell us whether the masquerade is good or not (i.e. if masquerade was good,
 // keep it, else vet a new one).
 func (d *direct) dial() (net.Conn, *masquerade, func(bool) bool, error) {
@@ -479,8 +484,10 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	dialTimeout := 10 * time.Second
 	sendServerNameExtension := false
 	addr := m.IpAddress
-	if strings.IndexByte(addr, ':') == -1 {
-		addr = addr + ":443"
+
+	_, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		addr = net.JoinHostPort(addr, "443")
 	}
 
 	conn, err := tlsdialer.DialTimeout(
