@@ -2,7 +2,7 @@ package fronted
 
 import (
 	"bytes"
-	"crypto/tls"
+	gtls "crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -21,6 +21,7 @@ import (
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer"
+	"github.com/refraction-networking/utls"
 )
 
 const (
@@ -36,7 +37,7 @@ var (
 	_instance = eventual.NewValue()
 
 	// Shared client session cache for all connections
-	clientSessionCache = tls.NewLRUClientSessionCache(1000)
+	clientSessionCache = gtls.NewLRUClientSessionCache(1000)
 )
 
 // direct is an implementation of http.RoundTripper
@@ -525,7 +526,7 @@ func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
 	return tlsConfig
 }
 
-func httpTransport(conn net.Conn, clientSessionCache tls.ClientSessionCache) http.RoundTripper {
+func httpTransport(conn net.Conn, clientSessionCache gtls.ClientSessionCache) http.RoundTripper {
 	return &directTransport{
 		Transport: http.Transport{
 			Dial: func(network, addr string) (net.Conn, error) {
@@ -533,7 +534,7 @@ func httpTransport(conn net.Conn, clientSessionCache tls.ClientSessionCache) htt
 			},
 			TLSHandshakeTimeout: 40 * time.Second,
 			DisableKeepAlives:   true,
-			TLSClientConfig: &tls.Config{
+			TLSClientConfig: &gtls.Config{
 				ClientSessionCache: clientSessionCache,
 			},
 		},
