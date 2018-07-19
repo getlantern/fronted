@@ -36,6 +36,16 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 		now := time.Now()
 		for _, m := range masquerades {
 			if now.Sub(m.LastVetted) < d.maxAllowedCachedAge {
+				// fill in default for masquerades lacking provider id
+				if m.ProviderID == "" {
+					m.ProviderID = d.defaultProviderID
+				}
+				// Skip entries for providers that are not configured.
+				_, ok := d.providers[m.ProviderID]
+				if !ok {
+					log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
+					continue
+				}
 				select {
 				case d.masquerades <- m:
 					// submitted
