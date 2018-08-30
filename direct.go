@@ -21,7 +21,7 @@ import (
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer"
-	"github.com/refraction-networking/utls"
+	tls "github.com/refraction-networking/utls"
 )
 
 const (
@@ -462,8 +462,17 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
 		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
-			log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
-			retriable = false
+			if strings.Contains(err.Error(), "tls.newSessionTicketMsg") {
+				// See https://github.com/getlantern/lantern-internal/issues/2265
+				// We sometimes see at least CloudFront servers requesting new session tickets. We should
+				// be able to just expire the old one and request a new one.
+				log.Debugf("Expiring config on tls.newSessionTicketMsg error '%v'", err.Error())
+				d.expireTLSConfig(m)
+				retriable = true
+			} else {
+				log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
+				retriable = false
+			}
 		} else {
 			log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
@@ -524,6 +533,14 @@ func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
 	}
 
 	return tlsConfig
+}
+
+// expireTLSConfig expires a TLS config. This is useful for things like when we see a
+// tls.newSessionTicketMsg from the server.
+func (d *direct) expireTLSConfig(m *Masquerade) {
+	d.tlsConfigsMutex.Lock()
+	defer d.tlsConfigsMutex.Unlock()
+	delete(d.tlsConfigs, m.Domain)
 }
 
 func httpTransport(conn net.Conn, clientSessionCache gtls.ClientSessionCache) http.RoundTripper {
