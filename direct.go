@@ -21,6 +21,7 @@ import (
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer"
+	tls "github.com/refraction-networking/utls"
 )
 
 const (
@@ -536,11 +537,10 @@ func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
 
 // expireTLSConfig expires a TLS config. This is useful for things like when we see a
 // tls.newSessionTicketMsg from the server.
-func (d *direct) expireTLSConfig(m *Masquerade) *tls.Config {
+func (d *direct) expireTLSConfig(m *Masquerade) {
 	d.tlsConfigsMutex.Lock()
 	defer d.tlsConfigsMutex.Unlock()
-
-	delete(d.tlsConfig, m.Domain)
+	delete(d.tlsConfigs, m.Domain)
 }
 
 func httpTransport(conn net.Conn, clientSessionCache gtls.ClientSessionCache) http.RoundTripper {
