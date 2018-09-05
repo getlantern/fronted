@@ -2,7 +2,6 @@ package fronted
 
 import (
 	"bytes"
-	gtls "crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -21,7 +20,7 @@ import (
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer"
-	"github.com/refraction-networking/utls"
+	tls "github.com/refraction-networking/utls"
 )
 
 const (
@@ -35,15 +34,10 @@ const (
 var (
 	log       = golog.LoggerFor("fronted")
 	_instance = eventual.NewValue()
-
-	// Shared client session cache for all connections
-	clientSessionCache = gtls.NewLRUClientSessionCache(1000)
 )
 
 // direct is an implementation of http.RoundTripper
 type direct struct {
-	tlsConfigsMutex     sync.Mutex
-	tlsConfigs          map[string]*tls.Config
 	certPool            *x509.CertPool
 	candidates          chan masquerade
 	masquerades         chan masquerade
@@ -82,7 +76,6 @@ func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProvi
 	}
 
 	d := &direct{
-		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
 		candidates:          make(chan masquerade, size),
 		masquerades:         make(chan masquerade, size),
@@ -159,7 +152,6 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 
 func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	d := &direct{
-		tlsConfigs:          make(map[string]*tls.Config),
 		certPool:            pool,
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
@@ -218,7 +210,7 @@ func (d *direct) vetOne() bool {
 // postCheck does a post with invalid data to verify domain-fronting works
 func postCheck(conn net.Conn, testURL string) bool {
 	client := &http.Client{
-		Transport: httpTransport(conn, nil),
+		Transport: frontedHTTPTransport(conn),
 	}
 	return doCheck(client, http.MethodPost, http.StatusAccepted, testURL)
 }
@@ -327,9 +319,8 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			conn.Close()
 			masqueradeGood(true)
 			return nil, fmt.Errorf("No alias for host %s", originHost)
-		} else {
-			log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 		}
+		log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 
 		reqi, err := cloneRequestWith(req, frontedHost, getBody())
 		if err != nil {
@@ -338,7 +329,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			continue
 		}
 
-		tr := httpTransport(conn, clientSessionCache)
+		tr := frontedHTTPTransport(conn)
 		resp, err := tr.RoundTrip(reqi)
 		if err != nil {
 			log.Debugf("Could not complete request: %v", err)
@@ -481,7 +472,7 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 }
 
 func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
-	tlsConfig := d.tlsConfig(m)
+	tlsConfig := d.frontingTLSConfig(m)
 	dialTimeout := 10 * time.Second
 	sendServerNameExtension := false
 	addr := m.IpAddress
@@ -505,28 +496,18 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	return conn, err
 }
 
-// tlsConfig builds a tls.Config for dialing the upstream host. Constructed
-// tls.Configs are cached on a per-masquerade basis to enable client session
-// caching and reduce the amount of PEM certificate parsing.
-func (d *direct) tlsConfig(m *Masquerade) *tls.Config {
-	d.tlsConfigsMutex.Lock()
-	defer d.tlsConfigsMutex.Unlock()
-
-	tlsConfig := d.tlsConfigs[m.Domain]
-	if tlsConfig == nil {
-		tlsConfig = &tls.Config{
-			ClientSessionCache: tls.NewLRUClientSessionCache(1000),
-			InsecureSkipVerify: false,
-			ServerName:         m.Domain,
-			RootCAs:            d.certPool,
-		}
-		d.tlsConfigs[m.Domain] = tlsConfig
+// frontingTLSConfig builds a tls.Config for dialing the fronting domain. This is to establish the
+// initial TCP connection to the CDN.
+func (d *direct) frontingTLSConfig(m *Masquerade) *tls.Config {
+	return &tls.Config{
+		ServerName: m.Domain,
+		RootCAs:    d.certPool,
 	}
-
-	return tlsConfig
 }
 
-func httpTransport(conn net.Conn, clientSessionCache gtls.ClientSessionCache) http.RoundTripper {
+// frontedHTTPTransport is the transport to use to route to the actual fronted destination domain.
+// This uses the pre-established connection to the CDN on the fronting domain.
+func frontedHTTPTransport(conn net.Conn) http.RoundTripper {
 	return &directTransport{
 		Transport: http.Transport{
 			Dial: func(network, addr string) (net.Conn, error) {
@@ -534,9 +515,6 @@ func httpTransport(conn net.Conn, clientSessionCache gtls.ClientSessionCache) ht
 			},
 			TLSHandshakeTimeout: 40 * time.Second,
 			DisableKeepAlives:   true,
-			TLSClientConfig: &gtls.Config{
-				ClientSessionCache: clientSessionCache,
-			},
 		},
 	}
 }
