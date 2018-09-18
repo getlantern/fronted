@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/getlantern/eventual"
-	"github.com/getlantern/golog"
+	"github.com/getlantern/zaplog"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer"
@@ -32,7 +32,7 @@ const (
 )
 
 var (
-	log       = golog.LoggerFor("fronted")
+	log       = zaplog.LoggerFor("fronted")
 	_instance = eventual.NewValue()
 )
 
@@ -56,7 +56,7 @@ type direct struct {
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (eg in a cache file)
 func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) {
-	log.Trace("Configuring fronted")
+	log.Debug("Configuring fronted")
 
 	if providers == nil || len(providers) == 0 {
 		log.Errorf("No fronted providers!!")
@@ -102,18 +102,18 @@ func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProvi
 	if numberToVet > 0 {
 		d.vet(numberToVet)
 	} else {
-		log.Debug("Not vetting any masquerades because we have enough cached ones")
+		log.Info("Not vetting any masquerades because we have enough cached ones")
 		d.signalReady()
 	}
 	_instance.Set(d)
 }
 
 func (d *direct) loadCandidates(initial map[string]*Provider) {
-	log.Debug("Loading candidates")
+	log.Info("Loading candidates")
 	for key, p := range initial {
 		arr := p.Masquerades
 		size := len(arr)
-		log.Tracef("Adding %d candidates for %v", size, key)
+		log.Debugf("Adding %d candidates for %v", size, key)
 
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
@@ -125,7 +125,7 @@ func (d *direct) loadCandidates(initial map[string]*Provider) {
 		}
 
 		for _, c := range sh {
-			log.Trace("Adding candidate")
+			log.Debug("Adding candidate")
 			d.candidates <- masquerade{Masquerade: *c, ProviderID: key}
 		}
 	}
@@ -165,7 +165,7 @@ func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 }
 
 func (d *direct) vet(numberToVet int) {
-	log.Tracef("Vetting %d initial candidates in parallel", numberToVet)
+	log.Debugf("Vetting %d initial candidates in parallel", numberToVet)
 	for i := 0; i < numberToVet; i++ {
 		go d.vetOneUntilGood()
 	}
@@ -182,7 +182,7 @@ func (d *direct) vetOneUntilGood() {
 func (d *direct) vetOne() bool {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
-	log.Trace("Vetting one")
+	log.Debug("Vetting one")
 	conn, m, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates)
 	if err != nil {
 		return masqueradesRemain
@@ -191,16 +191,16 @@ func (d *direct) vetOne() bool {
 
 	provider := d.providerFor(m)
 	if provider == nil {
-		log.Tracef("Skipping masquerade with disabled/unknown provider id '%s'", m.ProviderID)
+		log.Debugf("Skipping masquerade with disabled/unknown provider id '%s'", m.ProviderID)
 		return masqueradesRemain
 	}
 
 	if !masqueradeGood(postCheck(conn, provider.TestURL)) {
-		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade")
+		log.Debugf("Unsuccessful vetting with POST request, discarding masquerade")
 		return masqueradesRemain
 	}
 
-	log.Trace("Finished vetting one")
+	log.Debug("Finished vetting one")
 	// signal that at least one
 	// masquerade has been vetted successfully.
 	d.signalReady()
@@ -227,7 +227,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Debugf("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
+		log.Infof("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
 		return false
 	}
 	if resp.Body != nil {
@@ -235,7 +235,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		resp.Body.Close()
 	}
 	if resp.StatusCode != expectedStatus {
-		log.Debugf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		log.Infof("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
 		return false
 	}
 	return true
@@ -298,7 +298,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	for i := 0; i < tries; i++ {
 		if i > 0 {
-			log.Debugf("Retrying domain-fronted request, pass %d", i)
+			log.Infof("Retrying domain-fronted request, pass %d", i)
 		}
 
 		conn, m, masqueradeGood, err := d.dial()
@@ -308,7 +308,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		provider := d.providerFor(m)
 		if provider == nil {
-			log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", m.ProviderID)
+			log.Infof("Skipping masquerade with disabled/unknown provider '%s'", m.ProviderID)
 			masqueradeGood(false)
 			continue
 		}
@@ -320,7 +320,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			masqueradeGood(true)
 			return nil, fmt.Errorf("No alias for host %s", originHost)
 		}
-		log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
+		log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 
 		reqi, err := cloneRequestWith(req, frontedHost, getBody())
 		if err != nil {
@@ -332,14 +332,14 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		tr := frontedHTTPTransport(conn)
 		resp, err := tr.RoundTrip(reqi)
 		if err != nil {
-			log.Debugf("Could not complete request: %v", err)
+			log.Infof("Could not complete request: %v", err)
 			masqueradeGood(false)
 			continue
 		}
 
 		err = provider.ValidateResponse(resp)
 		if err != nil {
-			log.Debugf("Could not complete request: %v", err)
+			log.Infof("Could not complete request: %v", err)
 			resp.Body.Close()
 			masqueradeGood(false)
 			continue
@@ -390,7 +390,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 			select {
 			case in <- m:
 			default:
-				log.Debug("Dropping masquerade: retry channel full")
+				log.Info("Dropping masquerade: retry channel full")
 			}
 		}
 	}()
@@ -399,25 +399,25 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 		var m masquerade
 		select {
 		case m = <-in:
-			log.Trace("Got vetted masquerade")
+			log.Debug("Got vetted masquerade")
 		default:
-			log.Trace("No vetted masquerade found, falling back to unvetted candidate")
+			log.Debug("No vetted masquerade found, falling back to unvetted candidate")
 			select {
 			case m = <-d.candidates:
-				log.Trace("Got unvetted masquerade")
+				log.Debug("Got unvetted masquerade")
 			default:
 				return nil, nil, nil, false, errors.New("Could not dial any masquerade?")
 			}
 		}
 
-		log.Tracef("Dialing to %v", m)
+		log.Debugf("Dialing to %v", m)
 
 		// We do the full TLS connection here because in practice the domains at a given IP
 		// address can change frequently on CDNs, so the certificate may not match what
 		// we expect.
 		conn, retriable, err := d.doDial(&m.Masquerade)
 		if err == nil {
-			log.Trace("Returning connection")
+			log.Debug("Returning connection")
 			masqueradeGood := func(good bool) bool {
 				if good {
 					m.LastVetted = time.Now()
@@ -428,7 +428,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 						// ok
 					default:
 						// cache writing has fallen behind, drop masquerade
-						log.Debug("Dropping masquerade: cache writing is behind")
+						log.Info("Dropping masquerade: cache writing is behind")
 					}
 				} else {
 					go d.vetOneUntilGood()
@@ -440,7 +440,7 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 		} else if retriable {
 			retryLater = append(retryLater, m)
 		} else {
-			log.Debugf("Dropping masquerade: non retryable error: %v", err)
+			log.Infof("Dropping masquerade: non retryable error: %v", err)
 		}
 	}
 }
@@ -448,24 +448,24 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
 	conn, err = d.dialServerWith(m)
 	if err != nil {
-		log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
+		log.Debugf("Could not dial to %v, %v", m.IpAddress, err)
 		// Don't re-add this candidate if it's any certificate error, as that
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
 		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
-			log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
+			log.Infof("Not re-adding candidate that failed on error '%v'", err.Error())
 			retriable = false
 		} else {
-			log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
+			log.Debugf("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
 		}
 	} else {
-		log.Debugf("Got successful connection to: %v", m)
+		log.Infof("Got successful connection to: %v", m)
 		idleTimeout := 70 * time.Second
 
-		log.Debugf("Wrapping connection in idletiming connection: %v", m)
+		log.Infof("Wrapping connection in idletiming connection: %v", m)
 		conn = idletiming.Conn(conn, idleTimeout, func() {
-			log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
+			log.Debugf("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
 		})
 	}
 	return

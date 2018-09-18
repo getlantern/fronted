@@ -23,7 +23,7 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 	var cache []masquerade
 	file, err := os.Open(cacheFile)
 	if err == nil {
-		log.Debugf("Attempting to prepopulate masquerades from cache")
+		log.Infof("Attempting to prepopulate masquerades from cache")
 		defer file.Close()
 		var masquerades []masquerade
 		err := json.NewDecoder(file).Decode(&masquerades)
@@ -32,7 +32,7 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 			return cache
 		}
 
-		log.Debugf("Cache contained %d masquerades", len(masquerades))
+		log.Infof("Cache contained %d masquerades", len(masquerades))
 		now := time.Now()
 		for _, m := range masquerades {
 			if now.Sub(m.LastVetted) < d.maxAllowedCachedAge {
@@ -43,7 +43,7 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 				// Skip entries for providers that are not configured.
 				_, ok := d.providers[m.ProviderID]
 				if !ok {
-					log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
+					log.Infof("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
 					continue
 				}
 				select {
@@ -67,17 +67,17 @@ func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 		select {
 		case m := <-d.toCache:
 			if m == fillSentinel {
-				log.Debug("Cache closed, stop filling")
+				log.Info("Cache closed, stop filling")
 				return
 			}
-			log.Debugf("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
+			log.Infof("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
 			cache = append(cache, m)
 			cacheChanged = true
 		case <-saveTimer.C:
 			if !cacheChanged {
 				continue
 			}
-			log.Debug("Saving updated masquerade cache")
+			log.Info("Saving updated masquerade cache")
 			// Truncate cache to max length if necessary
 			if len(cache) > d.maxCacheSize {
 				truncated := make([]masquerade, d.maxCacheSize)
@@ -104,7 +104,7 @@ func CloseCache() {
 	_existing, ok := _instance.Get(0)
 	if ok && _existing != nil {
 		existing := _existing.(*direct)
-		log.Debug("Closing cache from existing instance")
+		log.Info("Closing cache from existing instance")
 		existing.closeCache()
 	}
 }

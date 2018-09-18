@@ -458,7 +458,7 @@ func TestCustomValidators(t *testing.T) {
 		}
 		if test.responseCode != http.StatusAccepted {
 			val := strconv.Itoa(test.responseCode)
-			log.Debugf("requesting forced response code %s", val)
+			log.Infof("requesting forced response code %s", val)
 			req.Header.Set(CDNForceFail, val)
 		}
 
@@ -492,14 +492,14 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 			if err != nil {
 				log.Errorf("Failed to dump request: %s", err)
 			} else {
-				log.Debugf("(%s) CDN Request: %s", domain, dump)
+				log.Infof("(%s) CDN Request: %s", domain, dump)
 			}
 
 			forceFail := req.Header.Get(CDNForceFail)
 
 			vhost := req.Host
 			if strings.HasSuffix(vhost, allowedSuffix) && forceFail == "" {
-				log.Debugf("accepting request host=%s ff=%s", vhost, forceFail)
+				log.Infof("accepting request host=%s ff=%s", vhost, forceFail)
 				body, _ := json.Marshal(&CDNResult{
 					Host:     vhost,
 					Path:     req.URL.Path,
@@ -510,23 +510,23 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 				rw.WriteHeader(http.StatusAccepted)
 				rw.Write(body)
 			} else {
-				log.Debugf("(%s) Rejecting request with host = %q ff=%s allowed=%s", domain, vhost, forceFail, allowedSuffix)
+				log.Infof("(%s) Rejecting request with host = %q ff=%s allowed=%s", domain, vhost, forceFail, allowedSuffix)
 				errorCode := http.StatusForbidden
 				if forceFail != "" {
 					errorCode, err = strconv.Atoi(forceFail)
 					if err != nil {
 						errorCode = http.StatusInternalServerError
 					}
-					log.Debugf("Forcing status code to %d", errorCode)
+					log.Infof("Forcing status code to %d", errorCode)
 				}
 				rw.WriteHeader(errorCode)
 			}
 		}))
 	addr := srv.Listener.Addr().String()
-	log.Debugf("Waiting for origin server at %s...", addr)
+	log.Infof("Waiting for origin server at %s...", addr)
 	if err := WaitForServer("tcp", addr, 10*time.Second); err != nil {
 		return nil, "", err
 	}
-	log.Debugf("Started %s CDN", domain)
+	log.Infof("Started %s CDN", domain)
 	return srv, addr, nil
 }
