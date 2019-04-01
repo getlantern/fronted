@@ -61,7 +61,8 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 }
 
 func (d *direct) fillCache(cache []masquerade, cacheFile string) {
-	saveTimer := time.NewTimer(d.cacheSaveInterval)
+	saveTicker := time.NewTicker(d.cacheSaveInterval)
+	defer saveTicker.Stop()
 	cacheChanged := false
 	for {
 		select {
@@ -73,7 +74,7 @@ func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 			log.Debugf("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
 			cache = append(cache, m)
 			cacheChanged = true
-		case <-saveTimer.C:
+		case <-saveTicker.C:
 			if !cacheChanged {
 				continue
 			}
@@ -94,7 +95,6 @@ func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 				log.Errorf("Unable to save cache to disk: %v", err)
 			}
 			cacheChanged = false
-			saveTimer.Reset(d.cacheSaveInterval)
 		}
 	}
 }
