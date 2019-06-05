@@ -190,7 +190,7 @@ func TestHostAliasesBasic(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil)
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -288,14 +288,14 @@ func TestHostAliasesMulti(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil)
+	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil)
 
 	masq2 := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
 	}
-	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil)
+	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -348,6 +348,124 @@ func TestHostAliasesMulti(t *testing.T) {
 	assert.True(t, providerCounts["sadcloud"] > 1)
 }
 
+func TestPassthrough(t *testing.T) {
+	headersIn := map[string][]string{
+		"X-Foo-Bar": []string{"Quux", "Baz"},
+		"X-Bar-Foo": []string{"XYZ"},
+		"X-Quux":    []string{""},
+	}
+	headersOut := map[string][]string{
+		"X-Foo-Bar":       []string{"Quux", "Baz"},
+		"X-Bar-Foo":       []string{"XYZ"},
+		"X-Quux":          []string{""},
+		"Connection":      []string{"close"},
+		"User-Agent":      []string{"Go-http-client/1.1"},
+		"Accept-Encoding": []string{"gzip"},
+	}
+
+	tests := []struct {
+		url            string
+		headers        map[string][]string
+		expectedResult CDNResult
+		expectedStatus int
+	}{
+		{
+			"http://fff.cloudsack.biz/foo",
+			headersIn,
+			CDNResult{"fff.cloudsack.biz", "/foo", "", "cloudsack", headersOut},
+			http.StatusAccepted,
+		},
+		{
+			"http://cloudsack.biz/bar",
+			headersIn,
+			CDNResult{"cloudsack.biz", "/bar", "", "cloudsack", headersOut},
+			http.StatusAccepted,
+		},
+		{
+			"http://XYZ.ZyZ.CloudSack.BiZ/bar",
+			headersIn,
+			CDNResult{"xyz.zyz.cloudsack.biz", "/bar", "", "cloudsack", headersOut},
+			http.StatusAccepted,
+		},
+	}
+
+	errtests := []struct {
+		url           string
+		expectedError string
+	}{
+		{
+			"http://www.notcloudsack.biz",
+			"Get http://www.notcloudsack.biz: No alias for host www.notcloudsack.biz",
+		},
+		{
+			"http://notcloudsack.biz",
+			"Get http://notcloudsack.biz: No alias for host notcloudsack.biz",
+		},
+		{
+			"https://www.google.com",
+			"Get https://www.google.com: No alias for host www.google.com",
+		},
+	}
+
+	cloudSack, cloudSackAddr, err := newCDN("cloudsack", "cloudsack.biz")
+	if !assert.NoError(t, err, "failed to start cloudsack cdn") {
+		return
+	}
+	defer cloudSack.Close()
+
+	masq := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: cloudSackAddr}}
+	alias := map[string]string{}
+	passthrough := []string{"cloudsack.biz"}
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough)
+
+	certs := x509.NewCertPool()
+	certs.AddCert(cloudSack.Certificate())
+	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+
+	rt, ok := NewDirect(10 * time.Second)
+	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
+		return
+	}
+	client := &http.Client{Transport: rt}
+	for _, test := range tests {
+		req, err := http.NewRequest(http.MethodGet, test.url, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		for k, v := range test.headers {
+			req.Header[k] = v
+		}
+		resp, err := client.Do(req)
+		if !assert.NoError(t, err, "Request %s failed", test.url) {
+			continue
+		}
+		assert.Equal(t, test.expectedStatus, resp.StatusCode)
+		if !assert.NotNil(t, resp.Body) {
+			continue
+		}
+
+		var result CDNResult
+		data, err := ioutil.ReadAll(resp.Body)
+		if !assert.NoError(t, err) {
+			continue
+		}
+
+		err = json.Unmarshal(data, &result)
+		if !assert.NoError(t, err) {
+			continue
+		}
+		assert.Equal(t, test.expectedResult, result)
+	}
+
+	for _, test := range errtests {
+		resp, err := client.Get(test.url)
+		assert.EqualError(t, err, test.expectedError)
+		assert.Nil(t, resp)
+
+	}
+}
+
 func TestCustomValidators(t *testing.T) {
 
 	sadCloud, sadCloudAddr, err := newCDN("sadcloud", "sadcloud.io")
@@ -365,7 +483,7 @@ func TestCustomValidators(t *testing.T) {
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
 		}
-		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator)
+		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil)
 
 		certs := x509.NewCertPool()
 		certs.AddCert(sadCloud.Certificate())
@@ -498,7 +616,7 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 			forceFail := req.Header.Get(CDNForceFail)
 
 			vhost := req.Host
-			if strings.HasSuffix(vhost, allowedSuffix) && forceFail == "" {
+			if vhost == domain || strings.HasSuffix(vhost, allowedSuffix) && forceFail == "" {
 				log.Debugf("accepting request host=%s ff=%s", vhost, forceFail)
 				body, _ := json.Marshal(&CDNResult{
 					Host:     vhost,

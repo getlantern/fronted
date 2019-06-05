@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getlantern/eventual"
 	"github.com/getlantern/golog"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
@@ -32,8 +31,7 @@ const (
 )
 
 var (
-	log       = golog.LoggerFor("fronted")
-	_instance = eventual.NewValue()
+	log = golog.LoggerFor("fronted")
 )
 
 // direct is an implementation of http.RoundTripper
@@ -49,63 +47,6 @@ type direct struct {
 	providers           map[string]*Provider
 	ready               chan struct{}
 	readyOnce           sync.Once
-}
-
-// Configure sets the masquerades to use, the trusted root CAs, and the
-// cache file for caching masquerades to set up direct domain fronting.
-// defaultProviderID is used when a masquerade without a provider is
-// encountered (eg in a cache file)
-func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) {
-	log.Trace("Configuring fronted")
-
-	if providers == nil || len(providers) == 0 {
-		log.Errorf("No fronted providers!!")
-		return
-	}
-
-	CloseCache()
-
-	size := 0
-	for _, p := range providers {
-		size += len(p.Masquerades)
-	}
-
-	if size == 0 {
-		log.Errorf("No masquerades!!")
-		return
-	}
-
-	d := &direct{
-		certPool:            pool,
-		candidates:          make(chan masquerade, size),
-		masquerades:         make(chan masquerade, size),
-		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
-		maxCacheSize:        defaultMaxCacheSize,
-		cacheSaveInterval:   defaultCacheSaveInterval,
-		toCache:             make(chan masquerade, defaultMaxCacheSize),
-		defaultProviderID:   defaultProviderID,
-		providers:           make(map[string]*Provider),
-		ready:               make(chan struct{}),
-	}
-
-	// copy providers
-	for k, p := range providers {
-		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator)
-	}
-
-	numberToVet := numberToVetInitially
-	if cacheFile != "" {
-		numberToVet -= d.initCaching(cacheFile)
-	}
-
-	d.loadCandidates(d.providers)
-	if numberToVet > 0 {
-		d.vet(numberToVet)
-	} else {
-		log.Debug("Not vetting any masquerades because we have enough cached ones")
-		d.signalReady()
-	}
-	_instance.Set(d)
 }
 
 func (d *direct) loadCandidates(initial map[string]*Provider) {
@@ -241,31 +182,17 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	return true
 }
 
-// NewDirect creates a new http.RoundTripper that does direct domain fronting.
-// If it can't obtain a working masquerade within the given timeout, it will
-// return nil/false.
-func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
-	start := time.Now()
-	instance, ok := _instance.Get(timeout)
-	if !ok {
-		log.Errorf("No DirectHttpClient available within %v", timeout)
-		return nil, false
-	}
-	remaining := timeout - time.Since(start)
-
-	// Wait to be signalled that at least one masquerade has been vetted...
-	select {
-	case <-instance.(*direct).ready:
-		return instance.(http.RoundTripper), true
-	case <-time.After(remaining):
-		log.Errorf("No DirectHttpClient available within %v", timeout)
-		return nil, false
-	}
-}
-
 // Do continually retries a given request until it succeeds because some
 // fronting providers will return a 403 for some domains.
 func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
+	res, _, err := d.RoundTripHijack(req)
+	return res, err
+}
+
+// Do continually retries a given request until it succeeds because some
+// fronting providers will return a 403 for some domains.  Also return the
+// underlying net.Conn established.
+func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, error) {
 	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
 
 	originHost := req.URL.Hostname()
@@ -276,7 +203,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		// store body in-memory to be able to replay it if necessary
 		body, err = ioutil.ReadAll(req.Body)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to read request body: %v", err)
+			return nil, nil, fmt.Errorf("Unable to read request body: %v", err)
 		}
 	}
 
@@ -304,7 +231,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		conn, m, masqueradeGood, err := d.dial()
 		if err != nil {
 			// unable to find good masquerade, fail
-			return nil, err
+			return nil, nil, err
 		}
 		provider := d.providerFor(m)
 		if provider == nil {
@@ -318,7 +245,7 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 			// so it is returned as good.
 			conn.Close()
 			masqueradeGood(true)
-			return nil, fmt.Errorf("No alias for host %s", originHost)
+			return nil, nil, fmt.Errorf("No alias for host %s", originHost)
 		}
 		log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 
@@ -346,10 +273,10 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		masqueradeGood(true)
-		return resp, nil
+		return resp, conn, nil
 	}
 
-	return nil, errors.New("Could not complete request even with retries")
+	return nil, nil, errors.New("Could not complete request even with retries")
 }
 
 func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {

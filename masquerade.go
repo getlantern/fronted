@@ -46,6 +46,12 @@ type Provider struct {
 	// Specific hostname mappings used for this provider.
 	// remaps certain requests to provider specific host names.
 	HostAliases map[string]string
+
+	// Allow unaliased pass-through of these domains if no
+	// alias is given. eg "cloudfront.net" for cloudfront
+	// provider.
+	PassthroughDomains []string
+
 	// Url used to vet masquerades for this provider
 	TestURL     string
 	Masquerades []*Masquerade
@@ -57,18 +63,22 @@ type Provider struct {
 }
 
 // Create a Provider with the given details
-func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator) *Provider {
+func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string) *Provider {
 	d := &Provider{
-		HostAliases: make(map[string]string),
-		TestURL:     testURL,
-		Masquerades: make([]*Masquerade, 0, len(masquerades)),
-		Validator:   validator,
+		HostAliases:        make(map[string]string),
+		TestURL:            testURL,
+		Masquerades:        make([]*Masquerade, 0, len(masquerades)),
+		Validator:          validator,
+		PassthroughDomains: make([]string, 0, len(passthrough)),
 	}
 	for k, v := range hosts {
 		d.HostAliases[strings.ToLower(k)] = v
 	}
 	for _, m := range masquerades {
 		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress})
+	}
+	for _, pt := range passthrough {
+		d.PassthroughDomains = append(d.PassthroughDomains, pt)
 	}
 	return d
 }
@@ -79,7 +89,19 @@ func (p *Provider) Lookup(hostname string) string {
 	if h, _, err := net.SplitHostPort(hostname); err == nil {
 		hostname = h
 	}
-	return p.HostAliases[strings.ToLower(hostname)]
+	hostname = strings.ToLower(hostname)
+	if alias := p.HostAliases[hostname]; alias != "" {
+		return alias
+	}
+
+	for _, pt := range p.PassthroughDomains {
+		pt = strings.ToLower(pt)
+		if pt == hostname || strings.HasSuffix(hostname, fmt.Sprintf(".%s", pt)) {
+			return hostname
+		}
+	}
+
+	return ""
 }
 
 // Validate a fronted response.  Returns an error if the
