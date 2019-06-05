@@ -151,7 +151,7 @@ func (d *direct) vetOne() bool {
 // postCheck does a post with invalid data to verify domain-fronting works
 func postCheck(conn net.Conn, testURL string) bool {
 	client := &http.Client{
-		Transport: frontedHTTPTransport(conn),
+		Transport: frontedHTTPTransport(conn, true),
 	}
 	return doCheck(client, http.MethodPost, http.StatusAccepted, testURL)
 }
@@ -256,7 +256,13 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 			continue
 		}
 
-		tr := frontedHTTPTransport(conn)
+		// don't clobber/confuse Connection header on Upgrade requests.
+		disableKeepAlives := true
+		if strings.EqualFold(reqi.Header.Get("Connection"), "upgrade") {
+			disableKeepAlives = false
+		}
+
+		tr := frontedHTTPTransport(conn, disableKeepAlives)
 		resp, err := tr.RoundTrip(reqi)
 		if err != nil {
 			log.Debugf("Could not complete request: %v", err)
@@ -434,14 +440,14 @@ func (d *direct) frontingTLSConfig(m *Masquerade) *tls.Config {
 
 // frontedHTTPTransport is the transport to use to route to the actual fronted destination domain.
 // This uses the pre-established connection to the CDN on the fronting domain.
-func frontedHTTPTransport(conn net.Conn) http.RoundTripper {
+func frontedHTTPTransport(conn net.Conn, disableKeepAlives bool) http.RoundTripper {
 	return &directTransport{
 		Transport: http.Transport{
 			Dial: func(network, addr string) (net.Conn, error) {
 				return conn, nil
 			},
 			TLSHandshakeTimeout: 40 * time.Second,
-			DisableKeepAlives:   true,
+			DisableKeepAlives:   disableKeepAlives,
 		},
 	}
 }
