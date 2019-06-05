@@ -370,21 +370,21 @@ func TestPassthrough(t *testing.T) {
 		expectedStatus int
 	}{
 		{
-			"http://fff.cloudsack.biz/foo",
+			"http://fff.ok.cloudsack.biz/foo",
 			headersIn,
-			CDNResult{"fff.cloudsack.biz", "/foo", "", "cloudsack", headersOut},
+			CDNResult{"fff.ok.cloudsack.biz", "/foo", "", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
 		{
-			"http://cloudsack.biz/bar",
+			"http://abc.cloudsack.biz/bar",
 			headersIn,
-			CDNResult{"cloudsack.biz", "/bar", "", "cloudsack", headersOut},
+			CDNResult{"abc.cloudsack.biz", "/bar", "", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
 		{
-			"http://XYZ.ZyZ.CloudSack.BiZ/bar",
+			"http://XYZ.ZyZ.OK.CloudSack.BiZ/bar",
 			headersIn,
-			CDNResult{"xyz.zyz.cloudsack.biz", "/bar", "", "cloudsack", headersOut},
+			CDNResult{"xyz.zyz.ok.cloudsack.biz", "/bar", "", "cloudsack", headersOut},
 			http.StatusAccepted,
 		},
 	}
@@ -394,12 +394,24 @@ func TestPassthrough(t *testing.T) {
 		expectedError string
 	}{
 		{
-			"http://www.notcloudsack.biz",
-			"Get http://www.notcloudsack.biz: No alias for host www.notcloudsack.biz",
+			"http://www.notok.cloudsack.biz",
+			"Get http://www.notok.cloudsack.biz: No alias for host www.notok.cloudsack.biz",
 		},
 		{
-			"http://notcloudsack.biz",
-			"Get http://notcloudsack.biz: No alias for host notcloudsack.biz",
+			"http://ok.cloudsack.biz",
+			"Get http://ok.cloudsack.biz: No alias for host ok.cloudsack.biz",
+		},
+		{
+			"http://www.abc.cloudsack.biz",
+			"Get http://www.abc.cloudsack.biz: No alias for host www.abc.cloudsack.biz",
+		},
+		{
+			"http://noabc.cloudsack.biz",
+			"Get http://noabc.cloudsack.biz: No alias for host noabc.cloudsack.biz",
+		},
+		{
+			"http://cloudsack.biz",
+			"Get http://cloudsack.biz: No alias for host cloudsack.biz",
 		},
 		{
 			"https://www.google.com",
@@ -415,7 +427,7 @@ func TestPassthrough(t *testing.T) {
 
 	masq := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{}
-	passthrough := []string{"cloudsack.biz"}
+	passthrough := []string{"*.ok.cloudsack.biz", "abc.cloudsack.biz"}
 	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough)
 
 	certs := x509.NewCertPool()

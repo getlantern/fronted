@@ -47,10 +47,13 @@ type Provider struct {
 	// remaps certain requests to provider specific host names.
 	HostAliases map[string]string
 
-	// Allow unaliased pass-through of these domains if no
-	// alias is given. eg "cloudfront.net" for cloudfront
-	// provider.
-	PassthroughDomains []string
+	// Allow unaliased pass-through of hostnames
+	// matching these patterns.
+	// eg "*.cloudfront.net" for cloudfront provider
+	// would permit all .cloudfront.net domains to
+	// pass through without alias. Only suffix
+	// patterns and exact matches are supported.
+	PassthroughPatterns []string
 
 	// Url used to vet masquerades for this provider
 	TestURL     string
@@ -65,11 +68,11 @@ type Provider struct {
 // Create a Provider with the given details
 func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string) *Provider {
 	d := &Provider{
-		HostAliases:        make(map[string]string),
-		TestURL:            testURL,
-		Masquerades:        make([]*Masquerade, 0, len(masquerades)),
-		Validator:          validator,
-		PassthroughDomains: make([]string, 0, len(passthrough)),
+		HostAliases:         make(map[string]string),
+		TestURL:             testURL,
+		Masquerades:         make([]*Masquerade, 0, len(masquerades)),
+		Validator:           validator,
+		PassthroughPatterns: make([]string, 0, len(passthrough)),
 	}
 	for k, v := range hosts {
 		d.HostAliases[strings.ToLower(k)] = v
@@ -78,7 +81,7 @@ func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquer
 		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress})
 	}
 	for _, pt := range passthrough {
-		d.PassthroughDomains = append(d.PassthroughDomains, pt)
+		d.PassthroughPatterns = append(d.PassthroughPatterns, pt)
 	}
 	return d
 }
@@ -94,9 +97,11 @@ func (p *Provider) Lookup(hostname string) string {
 		return alias
 	}
 
-	for _, pt := range p.PassthroughDomains {
+	for _, pt := range p.PassthroughPatterns {
 		pt = strings.ToLower(pt)
-		if pt == hostname || strings.HasSuffix(hostname, fmt.Sprintf(".%s", pt)) {
+		if strings.HasPrefix(pt, "*.") && strings.HasSuffix(hostname, pt[1:]) {
+			return hostname
+		} else if pt == hostname {
 			return hostname
 		}
 	}
