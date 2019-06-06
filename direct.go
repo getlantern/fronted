@@ -47,6 +47,7 @@ type direct struct {
 	providers           map[string]*Provider
 	ready               chan struct{}
 	readyOnce           sync.Once
+	clientHelloID       tls.ClientHelloID
 }
 
 func (d *direct) loadCandidates(initial map[string]*Provider) {
@@ -415,13 +416,14 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		addr = net.JoinHostPort(addr, "443")
 	}
 
-	conn, err := tlsdialer.DialTimeout(
-		netx.DialTimeout,
-		dialTimeout,
-		"tcp",
-		addr,
-		sendServerNameExtension, // SNI or no
-		tlsConfig)
+	dialer := &tlsdialer.Dialer{
+		DoDial:         netx.DialTimeout,
+		Timeout:        dialTimeout,
+		SendServerName: sendServerNameExtension,
+		Config:         tlsConfig,
+		ClientHelloID:  d.clientHelloID,
+	}
+	conn, err := dialer.Dial("tcp", addr)
 
 	if err != nil && m != nil {
 		err = fmt.Errorf("Unable to dial masquerade %s: %s", m.Domain, err)

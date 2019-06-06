@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/getlantern/eventual"
+	tls "github.com/refraction-networking/utls"
 )
 
 var (
-	defaultContext = NewFrontingContext("default")
+	DefaultContext = NewFrontingContext("default")
 )
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
@@ -20,8 +21,8 @@ var (
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (eg in a cache file)
 func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) {
-	if err := defaultContext.Configure(pool, providers, defaultProviderID, cacheFile); err != nil {
-		log.Errorf("Error configuring fronting %s context: %s!!", defaultContext.name, err)
+	if err := DefaultContext.Configure(pool, providers, defaultProviderID, cacheFile); err != nil {
+		log.Errorf("Error configuring fronting %s context: %s!!", DefaultContext.name, err)
 	}
 }
 
@@ -29,12 +30,12 @@ func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProvi
 // using the default context. If it can't obtain a working masquerade within
 // the given timeout, it will return nil/false.
 func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
-	return defaultContext.NewDirect(timeout)
+	return DefaultContext.NewDirect(timeout)
 }
 
 // CloseCache closes any existing cache file in the default context
 func CloseCache() {
-	defaultContext.CloseCache()
+	DefaultContext.CloseCache()
 }
 
 func NewFrontingContext(name string) *FrontingContext {
@@ -54,6 +55,10 @@ type FrontingContext struct {
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (eg in a cache file)
 func (fctx *FrontingContext) Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) error {
+	return fctx.ConfigureWithHello(pool, providers, defaultProviderID, cacheFile, tls.ClientHelloID{})
+}
+
+func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string, clientHelloID tls.ClientHelloID) error {
 	log.Tracef("Configuring fronted %s context", fctx.name)
 
 	if providers == nil || len(providers) == 0 {
@@ -87,6 +92,7 @@ func (fctx *FrontingContext) Configure(pool *x509.CertPool, providers map[string
 		defaultProviderID:   defaultProviderID,
 		providers:           make(map[string]*Provider),
 		ready:               make(chan struct{}),
+		clientHelloID:       clientHelloID,
 	}
 
 	// copy providers
