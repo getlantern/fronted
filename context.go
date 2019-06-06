@@ -1,11 +1,13 @@
 package fronted
 
-import "crypto/x509"
-import "fmt"
-import "net/http"
-import "time"
+import (
+	"crypto/x509"
+	"fmt"
+	"net/http"
+	"time"
 
-import "github.com/getlantern/eventual"
+	"github.com/getlantern/eventual"
+)
 
 var (
 	defaultContext = NewFrontingContext("default")
