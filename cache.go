@@ -99,16 +99,6 @@ func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 	}
 }
 
-// CloseCache closes any existing file cache.
-func CloseCache() {
-	_existing, ok := _instance.Get(0)
-	if ok && _existing != nil {
-		existing := _existing.(*direct)
-		log.Debug("Closing cache from existing instance")
-		existing.closeCache()
-	}
-}
-
 func (d *direct) closeCache() {
 	d.toCache <- fillSentinel
 }
