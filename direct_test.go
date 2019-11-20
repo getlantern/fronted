@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +36,12 @@ func TestDirectDomainFronting(t *testing.T) {
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string) {
+
+	dials := int64(0)
+	SetDialAuditor(func(conn net.Conn, err error) (net.Conn, error) {
+		atomic.AddInt64(&dials, 1)
+		return conn, err
+	})
 
 	getURL := "http://config.example.com/proxies.yaml.gz"
 	getHost := "config.example.com"
@@ -73,6 +81,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 		Transport: direct,
 	}
 	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
+	assert.True(t, atomic.LoadInt64(&dials) > 0, "Should have recorded some dials")
 }
 
 func TestVet(t *testing.T) {

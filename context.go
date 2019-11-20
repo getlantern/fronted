@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	// DefaultContext is the default context used when using package-level fronting methods.
 	DefaultContext = NewFrontingContext("default")
 )
 
@@ -38,6 +39,7 @@ func CloseCache() {
 	DefaultContext.CloseCache()
 }
 
+// NewFrontingContext creates a new FrontingContext with the given name.
 func NewFrontingContext(name string) *FrontingContext {
 	return &FrontingContext{
 		name:     name,

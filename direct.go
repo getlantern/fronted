@@ -423,7 +423,7 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		Config:         tlsConfig,
 		ClientHelloID:  d.clientHelloID,
 	}
-	conn, err := dialer.Dial("tcp", addr)
+	conn, err := getDialAuditor()(dialer.Dial("tcp", addr))
 
 	if err != nil && m != nil {
 		err = fmt.Errorf("Unable to dial masquerade %s: %s", m.Domain, err)
