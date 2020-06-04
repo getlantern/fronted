@@ -17,6 +17,7 @@ import (
 	"time"
 
 	. "github.com/getlantern/waitforserver"
+	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,7 +55,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	Configure(certs, p, testProviderID, cacheFile)
+	Configure(p, testProviderID, ConfigureOptions{certs, cacheFile, tls.ClientHelloID{}})
 
 	direct, ok := NewDirect(30 * time.Second)
 	if !assert.True(t, ok) {
@@ -194,7 +195,7 @@ func TestHostAliasesBasic(t *testing.T) {
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
-	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack", ConfigureOptions{CertPool: certs})
 
 	rt, ok := NewDirect(10 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
@@ -306,7 +307,7 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	Configure(certs, providers, "cloudsack", "")
+	Configure(providers, "cloudsack", ConfigureOptions{CertPool: certs})
 	rt, ok := NewDirect(10 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
@@ -432,7 +433,7 @@ func TestPassthrough(t *testing.T) {
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
-	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack", ConfigureOptions{CertPool: certs})
 
 	rt, ok := NewDirect(10 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
@@ -504,7 +505,7 @@ func TestCustomValidators(t *testing.T) {
 			"sadcloud": p,
 		}
 
-		Configure(certs, providers, "sadcloud", "")
+		Configure(providers, "sadcloud", ConfigureOptions{CertPool: certs})
 	}
 
 	// This error indicates that the validator has discarded all masquerades.

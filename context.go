@@ -14,14 +14,28 @@ var (
 	DefaultContext = NewFrontingContext("default")
 )
 
+// ConfigureOptions is used in Configure and FrontingContext.Configure.
+type ConfigureOptions struct {
+	// CertPool sets the root CAs used to verify server certificates. If nil, the host's root CA set
+	// will be used.
+	CertPool *x509.CertPool
+
+	// CacheFile, if provided, will be used to cache providers.
+	CacheFile string
+
+	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic. See
+	// https://pkg.go.dev/github.com/refraction-networking/utls?tab=doc#pkg-variables
+	ClientHelloID tls.ClientHelloID
+}
+
 // Configure sets the masquerades to use, the trusted root CAs, and the
 // cache file for caching masquerades to set up direct domain fronting
 // in the default context.
 //
 // defaultProviderID is used when a masquerade without a provider is
-// encountered (eg in a cache file)
-func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) {
-	if err := DefaultContext.Configure(pool, providers, defaultProviderID, cacheFile); err != nil {
+// encountered (e.g. in a cache file).
+func Configure(providers map[string]*Provider, defaultProviderID string, opts ConfigureOptions) {
+	if err := DefaultContext.Configure(providers, defaultProviderID, opts); err != nil {
 		log.Errorf("Error configuring fronting %s context: %s!!", DefaultContext.name, err)
 	}
 }
@@ -52,17 +66,14 @@ type FrontingContext struct {
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
 // cache file for caching masquerades to set up direct domain fronting.
+//
 // defaultProviderID is used when a masquerade without a provider is
-// encountered (eg in a cache file)
-func (fctx *FrontingContext) Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) error {
-	return fctx.ConfigureWithHello(pool, providers, defaultProviderID, cacheFile, tls.ClientHelloID{})
-}
-
-func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string, clientHelloID tls.ClientHelloID) error {
+// encountered (e.g. in a cache file).
+func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultProviderID string, opts ConfigureOptions) error {
 	log.Tracef("Configuring fronted %s context", fctx.name)
 
 	if providers == nil || len(providers) == 0 {
-		return fmt.Errorf("No fronted providers for %s context.", fctx.name)
+		return fmt.Errorf("no fronted providers for %s context", fctx.name)
 	}
 
 	_existing, ok := fctx.instance.Get(0)
@@ -76,13 +87,12 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	for _, p := range providers {
 		size += len(p.Masquerades)
 	}
-
 	if size == 0 {
-		return fmt.Errorf("No masquerades for %s context.", fctx.name)
+		return fmt.Errorf("no masquerades for %s context", fctx.name)
 	}
 
 	d := &direct{
-		certPool:            pool,
+		certPool:            opts.CertPool,
 		candidates:          make(chan masquerade, size),
 		masquerades:         make(chan masquerade, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
@@ -92,7 +102,7 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		defaultProviderID:   defaultProviderID,
 		providers:           make(map[string]*Provider),
 		ready:               make(chan struct{}),
-		clientHelloID:       clientHelloID,
+		clientHelloID:       opts.ClientHelloID,
 	}
 
 	// copy providers
@@ -101,8 +111,8 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	}
 
 	numberToVet := numberToVetInitially
-	if cacheFile != "" {
-		numberToVet -= d.initCaching(cacheFile)
+	if opts.CacheFile != "" {
+		numberToVet -= d.initCaching(opts.CacheFile)
 	}
 
 	d.loadCandidates(d.providers)
