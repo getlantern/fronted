@@ -17,7 +17,6 @@ import (
 	"time"
 
 	. "github.com/getlantern/waitforserver"
-	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -55,7 +54,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	Configure(p, testProviderID, ConfigureOptions{certs, cacheFile, tls.ClientHelloID{}})
+	Configure(p, testProviderID, ConfigureOptions{CertPool: certs, CacheFile: cacheFile})
 
 	direct, ok := NewDirect(30 * time.Second)
 	if !assert.True(t, ok) {

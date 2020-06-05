@@ -1,12 +1,15 @@
 package fronted
 
 import (
+	"context"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/getlantern/eventual"
+	"github.com/getlantern/netx"
 	tls "github.com/refraction-networking/utls"
 )
 
@@ -26,6 +29,10 @@ type ConfigureOptions struct {
 	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic. See
 	// https://pkg.go.dev/github.com/refraction-networking/utls?tab=doc#pkg-variables
 	ClientHelloID tls.ClientHelloID
+
+	// DialTransport is used to establish the transport connection to the masquerade. This will
+	// almost certainly be a TCP connection. If nil, getlantern/netx.DialContext will be used.
+	DialTransport func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
@@ -91,6 +98,10 @@ func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultPr
 		return fmt.Errorf("no masquerades for %s context", fctx.name)
 	}
 
+	if opts.DialTransport == nil {
+		opts.DialTransport = netx.DialContext
+	}
+
 	d := &direct{
 		certPool:            opts.CertPool,
 		candidates:          make(chan masquerade, size),
@@ -102,6 +113,7 @@ func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultPr
 		defaultProviderID:   defaultProviderID,
 		providers:           make(map[string]*Provider),
 		ready:               make(chan struct{}),
+		dialTransport:       opts.DialTransport,
 		clientHelloID:       opts.ClientHelloID,
 	}
 

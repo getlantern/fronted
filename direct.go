@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -47,6 +48,7 @@ type direct struct {
 	providers           map[string]*Provider
 	ready               chan struct{}
 	readyOnce           sync.Once
+	dialTransport       func(ctx context.Context, network, address string) (net.Conn, error)
 	clientHelloID       tls.ClientHelloID
 }
 
@@ -95,6 +97,7 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	d := &direct{
 		certPool:            pool,
+		dialTransport:       netx.DialContext,
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 	}
@@ -417,7 +420,11 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	}
 
 	dialer := &tlsdialer.Dialer{
-		DoDial:         netx.DialTimeout,
+		DoDial: func(network, address string, timeout time.Duration) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			return d.dialTransport(ctx, network, address)
+		},
 		Timeout:        dialTimeout,
 		SendServerName: sendServerNameExtension,
 		Config:         tlsConfig,
