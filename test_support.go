@@ -14,24 +14,6 @@ var (
 	testMasquerades = DefaultCloudfrontMasquerades
 )
 
-// ConfigureForTest configures fronted for testing using default masquerades and
-// certificate authorities.
-func ConfigureForTest(t *testing.T) {
-	ConfigureCachingForTest(t, "")
-}
-
-func ConfigureCachingForTest(t *testing.T, cacheFile string) {
-	certs := trustedCACerts(t)
-	p := testProviders()
-	Configure(p, testProviderID, ConfigureOptions{CertPool: certs, CacheFile: cacheFile})
-}
-
-func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) {
-	certs := trustedCACerts(t)
-	p := testProvidersWithHosts(hosts)
-	Configure(p, testProviderID, ConfigureOptions{CertPool: certs})
-}
-
 func trustedCACerts(t *testing.T) *x509.CertPool {
 	certs := make([]string, 0, len(DefaultTrustedCAs))
 	for _, ca := range DefaultTrustedCAs {

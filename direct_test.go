@@ -52,11 +52,11 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 		pingHost: pingFrontedHost,
 		getHost:  getFrontedHost,
 	}
-	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	Configure(p, testProviderID, ConfigureOptions{CertPool: certs, CacheFile: cacheFile})
+	Configure(p, testProviderID)
 
-	direct, ok := NewDirect(30 * time.Second)
+	certs := trustedCACerts(t)
+	direct, ok := NewDirect(30*time.Second, DirectOptions{CertPool: certs, CacheFile: cacheFile})
 	if !assert.True(t, ok) {
 		return
 	}
@@ -65,7 +65,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	}
 	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	direct, ok = NewDirect(30 * time.Second)
+	direct, ok = NewDirect(30*time.Second, DirectOptions{CertPool: certs, CacheFile: cacheFile})
 	if !assert.True(t, ok) {
 		return
 	}
@@ -194,9 +194,9 @@ func TestHostAliasesBasic(t *testing.T) {
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
-	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack", ConfigureOptions{CertPool: certs})
+	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack")
 
-	rt, ok := NewDirect(10 * time.Second)
+	rt, ok := NewDirect(10*time.Second, DirectOptions{CertPool: certs})
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -306,8 +306,8 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	Configure(providers, "cloudsack", ConfigureOptions{CertPool: certs})
-	rt, ok := NewDirect(10 * time.Second)
+	Configure(providers, "cloudsack")
+	rt, ok := NewDirect(10*time.Second, DirectOptions{CertPool: certs})
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -432,9 +432,9 @@ func TestPassthrough(t *testing.T) {
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
-	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack", ConfigureOptions{CertPool: certs})
+	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack")
 
-	rt, ok := NewDirect(10 * time.Second)
+	rt, ok := NewDirect(10*time.Second, DirectOptions{CertPool: certs})
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -497,14 +497,11 @@ func TestCustomValidators(t *testing.T) {
 		}
 		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil)
 
-		certs := x509.NewCertPool()
-		certs.AddCert(sadCloud.Certificate())
-
 		providers := map[string]*Provider{
 			"sadcloud": p,
 		}
 
-		Configure(providers, "sadcloud", ConfigureOptions{CertPool: certs})
+		Configure(providers, "sadcloud")
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
@@ -572,9 +569,11 @@ func TestCustomValidators(t *testing.T) {
 		},
 	}
 
+	certs := x509.NewCertPool()
+	certs.AddCert(sadCloud.Certificate())
 	for _, test := range tests {
 		setup(test.validator)
-		direct, ok := NewDirect(1 * time.Second)
+		direct, ok := NewDirect(1*time.Second, DirectOptions{CertPool: certs})
 		if !assert.True(t, ok) {
 			return
 		}
