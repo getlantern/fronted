@@ -94,8 +94,11 @@ func TestLoadCandidates(t *testing.T) {
 		}
 	}
 
-	d, err := newDirect(context.Background(), providers, "", numberToVetInitially, nil, DirectOptions{})
-	require.NoError(t, err)
+	d := &direct{
+		candidates: make(chan masquerade, len(expected)),
+		providers:  providers,
+	}
+	d.loadCandidates()
 	close(d.candidates)
 
 	actual := make(map[Masquerade]bool)
