@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -8,13 +9,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCaching(t *testing.T) {
+	const (
+		maxSize      = 3
+		maxAge       = 250 * time.Millisecond
+		saveInterval = 50 * time.Millisecond
+		timeout      = time.Second
+	)
+
 	dir, err := ioutil.TempDir("", "direct_test")
-	if !assert.NoError(t, err, "Unable to create temp dir") {
-		return
-	}
+	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.1")
 
@@ -25,32 +32,26 @@ func TestCaching(t *testing.T) {
 		cloudsackID:    NewProvider(nil, "", nil, nil, nil),
 	}
 
+	cache, err := newMasqueradeCache(cacheFile, maxSize, maxAge, saveInterval)
+	require.NoError(t, err)
+
 	makeDirect := func() *direct {
-		d := &direct{
-			candidates:          make(chan masquerade, 1000),
-			masquerades:         make(chan masquerade, 1000),
-			maxAllowedCachedAge: 250 * time.Millisecond,
-			maxCacheSize:        3,
-			cacheSaveInterval:   50 * time.Millisecond,
-			toCache:             make(chan masquerade, 1000),
-			providers:           providers,
-			defaultProviderID:   cloudsackID,
-		}
-		go d.fillCache(make([]masquerade, 0), cacheFile)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		d, err := newDirect(ctx, providers, cloudsackID, cache, DirectOptions{})
+		require.NoError(t, err)
+		d.candidates = make(chan masquerade, 1000)
+		d.masquerades = make(chan masquerade, 1000)
 		return d
 	}
 
 	now := time.Now()
-	ma := masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now, testProviderID}
-	mb := masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now, testProviderID}
-	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now, ""}         // defaulted
-	md := masquerade{Masquerade{Domain: "d", IpAddress: "4"}, now, "sadcloud"} // skipped
+	cache.write(masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now, testProviderID})
+	cache.write(masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now, testProviderID})
+	cache.write(masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now, ""})         // defaulted
+	cache.write(masquerade{Masquerade{Domain: "d", IpAddress: "4"}, now, "sadcloud"}) // skipped
 
 	d := makeDirect()
-	d.toCache <- ma
-	d.toCache <- mb
-	d.toCache <- mc
-	d.toCache <- md
 
 	readMasquerades := func() []masquerade {
 		var result []masquerade
@@ -65,14 +66,14 @@ func TestCaching(t *testing.T) {
 	}
 
 	// Fill the cache
-	time.Sleep(d.cacheSaveInterval * 2)
-	d.closeCache()
-
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(saveInterval * 2)
+	cache.close()
+	time.Sleep(saveInterval)
 
 	// Reopen cache file and make sure right data was in there
+	cache, err = newMasqueradeCache(cacheFile, maxSize, maxAge, saveInterval)
+	require.NoError(t, err)
 	d = makeDirect()
-	d.prepopulateMasquerades(cacheFile)
 	masquerades := readMasquerades()
 	assert.Len(t, masquerades, 2, "Wrong number of masquerades read")
 	assert.Equal(t, "b", masquerades[0].Domain, "Wrong masquerade at position 0")
@@ -81,11 +82,12 @@ func TestCaching(t *testing.T) {
 	assert.Equal(t, "c", masquerades[1].Domain, "Wrong masquerade at position 0")
 	assert.Equal(t, "3", masquerades[1].IpAddress, "Masquerade at position 1 has wrong IpAddress")
 	assert.Equal(t, cloudsackID, masquerades[1].ProviderID, "Masquerade at position 1 has wrong ProviderID")
-	d.closeCache()
+	cache.close()
 
-	time.Sleep(d.maxAllowedCachedAge)
+	time.Sleep(maxAge)
+	cache, err = newMasqueradeCache(cacheFile, maxSize, maxAge, saveInterval)
+	require.NoError(t, err)
 	d = makeDirect()
-	d.prepopulateMasquerades(cacheFile)
 	assert.Empty(t, readMasquerades(), "Cache should be empty after masquerades expire")
-	d.closeCache()
+	cache.close()
 }

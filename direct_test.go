@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 
 	. "github.com/getlantern/waitforserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDirectDomainFronting(t *testing.T) {
@@ -34,7 +36,6 @@ func TestDirectDomainFronting(t *testing.T) {
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string) {
-
 	getURL := "http://config.example.com/proxies.yaml.gz"
 	getHost := "config.example.com"
 	getFrontedHost := "d2wi0vwulmtn99.cloudfront.net"
@@ -56,19 +57,15 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	Configure(p, testProviderID)
 
 	certs := trustedCACerts(t)
-	direct, ok := NewDirect(30*time.Second, DirectOptions{CertPool: certs, CacheFile: cacheFile})
-	if !assert.True(t, ok) {
-		return
-	}
+	direct, err := NewDirect(context.Background(), DirectOptions{CertPool: certs, CacheFile: cacheFile})
+	require.NoError(t, err)
 	client := &http.Client{
 		Transport: direct,
 	}
 	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	direct, ok = NewDirect(30*time.Second, DirectOptions{CertPool: certs, CacheFile: cacheFile})
-	if !assert.True(t, ok) {
-		return
-	}
+	direct, err = NewDirect(context.Background(), DirectOptions{CertPool: certs, CacheFile: cacheFile})
+	require.NoError(t, err)
 	client = &http.Client{
 		Transport: direct,
 	}
@@ -95,11 +92,8 @@ func TestLoadCandidates(t *testing.T) {
 		}
 	}
 
-	d := &direct{
-		candidates: make(chan masquerade, len(expected)),
-	}
-
-	d.loadCandidates(providers)
+	d, err := newDirect(context.Background(), providers, "", nil, DirectOptions{})
+	require.NoError(t, err)
 	close(d.candidates)
 
 	actual := make(map[Masquerade]bool)
@@ -196,10 +190,8 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack")
 
-	rt, ok := NewDirect(10*time.Second, DirectOptions{CertPool: certs})
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
-		return
-	}
+	rt, err := NewDirect(context.Background(), DirectOptions{CertPool: certs})
+	require.NoError(t, err)
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
 		req, err := http.NewRequest(http.MethodGet, test.url, nil)
@@ -307,10 +299,8 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	Configure(providers, "cloudsack")
-	rt, ok := NewDirect(10*time.Second, DirectOptions{CertPool: certs})
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
-		return
-	}
+	rt, err := NewDirect(context.Background(), DirectOptions{CertPool: certs})
+	require.NoError(t, err)
 	client := &http.Client{Transport: rt}
 
 	providerCounts := make(map[string]int)
@@ -434,10 +424,8 @@ func TestPassthrough(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack")
 
-	rt, ok := NewDirect(10*time.Second, DirectOptions{CertPool: certs})
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
-		return
-	}
+	rt, err := NewDirect(context.Background(), DirectOptions{CertPool: certs})
+	require.NoError(t, err)
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
 		req, err := http.NewRequest(http.MethodGet, test.url, nil)
@@ -573,10 +561,8 @@ func TestCustomValidators(t *testing.T) {
 	certs.AddCert(sadCloud.Certificate())
 	for _, test := range tests {
 		setup(test.validator)
-		direct, ok := NewDirect(1*time.Second, DirectOptions{CertPool: certs})
-		if !assert.True(t, ok) {
-			return
-		}
+		direct, err := NewDirect(context.Background(), DirectOptions{CertPool: certs})
+		require.NoError(t, err)
 		client := &http.Client{
 			Transport: direct,
 		}

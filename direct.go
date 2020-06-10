@@ -97,13 +97,11 @@ func newDirect(
 			p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns)
 	}
 	numberToVet := numberToVetInitially
-	if cache != nil {
-		submittedFromCache, err := d.initFromCache(cache)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize from cache file: %w", err)
-		}
-		numberToVet -= submittedFromCache
+	pulledFromCache, err := d.initFromCache()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize from cache file: %w", err)
 	}
+	numberToVet -= pulledFromCache
 	d.loadCandidates()
 	if numberToVet > 0 {
 		d.vet(numberToVet)
@@ -119,8 +117,11 @@ func newDirect(
 	}
 }
 
-func (d *direct) initFromCache(c *masqueradeCache) (submitted int, err error) {
-	inCache, err := c.read()
+func (d *direct) initFromCache() (used int, err error) {
+	if d.cache == nil {
+		return 0, nil
+	}
+	inCache, err := d.cache.read()
 	if err != nil {
 		return 0, fmt.Errorf("failed to read cache file: %w", err)
 	}
@@ -138,12 +139,12 @@ func (d *direct) initFromCache(c *masqueradeCache) (submitted int, err error) {
 		}
 		select {
 		case d.masquerades <- m:
-			submitted++
+			used++
 		default:
 			// Channel is full, that's okay.
 		}
 	}
-	return submitted, nil
+	return used, nil
 }
 
 func (d *direct) loadCandidates() {
