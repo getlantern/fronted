@@ -53,11 +53,11 @@ func (c *masqueradeCache) read() ([]masquerade, error) {
 }
 
 func (c *masqueradeCache) readUnsafe() ([]masquerade, error) {
-	inMemory := make([]masquerade, len(c.newEntries))
-	copy(inMemory, c.newEntries)
+	m := make([]masquerade, len(c.newEntries))
+	copy(m, c.newEntries)
 
 	if _, err := os.Stat(c.filename); errors.Is(err, os.ErrNotExist) {
-		return inMemory, nil
+		return m, nil
 	}
 	f, err := os.Open(c.filename)
 	if err != nil {
@@ -68,13 +68,11 @@ func (c *masqueradeCache) readUnsafe() ([]masquerade, error) {
 	if err := json.NewDecoder(f).Decode(&fromDisk); err != nil {
 		return nil, fmt.Errorf("failed to decode cache file: %w", err)
 	}
-	m := []masquerade{}
 	for _, masq := range fromDisk {
 		if time.Since(masq.LastVetted) < c.maxAge {
 			m = append(m, masq)
 		}
 	}
-	m = append(m, inMemory...)
 	return m, nil
 }
 
