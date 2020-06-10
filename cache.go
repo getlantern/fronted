@@ -115,3 +115,52 @@ func (c *masqueradeCache) close() {
 	log.Debugf("cache at %s closed", c.filename)
 	c.closeOnce.Do(func() { close(c.done) })
 }
+
+// We track open caches centrally to:
+//	(a) Ensure only a single masqueradeCache is open for each file at any time. Otherwise, different
+// 	    instances may clobber each other.
+//	(b) Ensure this single masqueradeCache instance is closed when all users are done using it.
+
+var globalCacheManager = newCacheManager()
+
+type cacheManager struct {
+	// filename -> cache
+	openCaches map[string]*masqueradeCache
+
+	// filename -> open handles
+	openHandles map[string]int
+
+	sync.Mutex
+}
+
+func newCacheManager() *cacheManager {
+	return &cacheManager{map[string]*masqueradeCache{}, map[string]int{}, sync.Mutex{}}
+}
+
+func (cm *cacheManager) get(filename string, maxSize int, maxAge, saveInterval time.Duration) *masqueradeCache {
+	cm.Lock()
+	defer cm.Unlock()
+	c, ok := cm.openCaches[filename]
+	if !ok {
+		c = newMasqueradeCache(filename, maxSize, maxAge, saveInterval)
+		cm.openCaches[filename] = c
+		cm.openHandles[filename] = 0
+	}
+	cm.openHandles[filename]++
+	return c
+}
+
+func (cm *cacheManager) closeHandle(c *masqueradeCache) {
+	cm.Lock()
+	defer cm.Unlock()
+	c, ok := cm.openCaches[c.filename]
+	if !ok {
+		return
+	}
+	cm.openHandles[c.filename]--
+	if cm.openHandles[c.filename] <= 0 {
+		c.close()
+		delete(cm.openCaches, c.filename)
+		delete(cm.openHandles, c.filename)
+	}
+}

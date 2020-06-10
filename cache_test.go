@@ -33,7 +33,7 @@ func TestCaching(t *testing.T) {
 
 	cache := newMasqueradeCache(cacheFile, maxSize, maxAge, saveInterval)
 	makeDirect := func() *direct {
-		d, err := newDirect(context.Background(), providers, cloudsackID, 0, cache, DirectOptions{})
+		d, err := newDirect(context.Background(), providers, cloudsackID, 0, cache, RoundTripperOptions{})
 		require.NoError(t, err)
 		d.candidates = make(chan masquerade, 1000)
 		d.masquerades = make(chan masquerade, 1000)

@@ -34,12 +34,12 @@ func Configure(providers map[string]*Provider, defaultProviderID string) {
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
 // The default context must be configured in order to create a RoundTripper.
-func NewDirect(opts DirectOptions) (http.RoundTripper, error) {
+func NewDirect(opts RoundTripperOptions) (http.RoundTripper, error) {
 	return NewDirectContext(context.Background(), opts)
 }
 
 // NewDirectContext is like NewDirect, but accepts an execution context.
-func NewDirectContext(ctx context.Context, opts DirectOptions) (http.RoundTripper, error) {
+func NewDirectContext(ctx context.Context, opts RoundTripperOptions) (http.RoundTripper, error) {
 	return DefaultContext.NewDirectContext(ctx, opts)
 }
 
@@ -90,12 +90,12 @@ func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultPr
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
 // The fronting context must be configured in order to create a RoundTripper.
-func (fctx *FrontingContext) NewDirect(opts DirectOptions) (http.RoundTripper, error) {
+func (fctx *FrontingContext) NewDirect(opts RoundTripperOptions) (http.RoundTripper, error) {
 	return fctx.NewDirectContext(context.Background(), opts)
 }
 
 // NewDirectContext is like NewDirect, but accepts an execution context.
-func (fctx *FrontingContext) NewDirectContext(ctx context.Context, opts DirectOptions) (http.RoundTripper, error) {
+func (fctx *FrontingContext) NewDirectContext(ctx context.Context, opts RoundTripperOptions) (http.RoundTripper, error) {
 	// Note: eventual.Value.Get(-1) will wait forever. If no deadline is set, this is what we want.
 	timeout := time.Duration(-1)
 	if deadline, ok := ctx.Deadline(); ok {

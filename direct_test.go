@@ -58,14 +58,14 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	Configure(p, testProviderID)
 
 	certs := trustedCACerts(t)
-	direct, err := NewDirect(DirectOptions{CertPool: certs, CacheFile: cacheFile})
+	direct, err := NewDirect(RoundTripperOptions{CertPool: certs, CacheFile: cacheFile})
 	require.NoError(t, err)
 	client := &http.Client{
 		Transport: direct,
 	}
 	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	direct, err = NewDirect(DirectOptions{CertPool: certs, CacheFile: cacheFile})
+	direct, err = NewDirect(RoundTripperOptions{CertPool: certs, CacheFile: cacheFile})
 	require.NoError(t, err)
 	client = &http.Client{
 		Transport: direct,
@@ -194,7 +194,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack")
 
-	rt, err := NewDirect(DirectOptions{CertPool: certs})
+	rt, err := NewDirect(RoundTripperOptions{CertPool: certs})
 	require.NoError(t, err)
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -303,7 +303,7 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	Configure(providers, "cloudsack")
-	rt, err := NewDirect(DirectOptions{CertPool: certs})
+	rt, err := NewDirect(RoundTripperOptions{CertPool: certs})
 	require.NoError(t, err)
 	client := &http.Client{Transport: rt}
 
@@ -428,7 +428,7 @@ func TestPassthrough(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(map[string]*Provider{"cloudsack": p}, "cloudsack")
 
-	rt, err := NewDirect(DirectOptions{CertPool: certs})
+	rt, err := NewDirect(RoundTripperOptions{CertPool: certs})
 	require.NoError(t, err)
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -565,7 +565,7 @@ func TestCustomValidators(t *testing.T) {
 	certs.AddCert(sadCloud.Certificate())
 	for _, test := range tests {
 		setup(test.validator)
-		direct, err := NewDirect(DirectOptions{CertPool: certs})
+		direct, err := NewDirect(RoundTripperOptions{CertPool: certs})
 		require.NoError(t, err)
 		client := &http.Client{
 			Transport: direct,

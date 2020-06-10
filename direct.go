@@ -35,9 +35,16 @@ var (
 	log = golog.LoggerFor("fronted")
 )
 
-// DirectOptions defines optional paramaters for NewDirect and
+// RoundTripper unifies http.RoundTripper and io.Closer.
+type RoundTripper interface {
+	http.RoundTripper
+	io.Closer
+}
+
+// RoundTripperOptions defines optional paramaters for NewDirect and
 // FrontingContext.NewDirect.
-type DirectOptions struct {
+// TODO: update type and field doc
+type RoundTripperOptions struct {
 	// CertPool sets the root CAs used to verify server certificates. If nil,
 	// the host's root CA set will be used.
 	CertPool *x509.CertPool
@@ -71,10 +78,73 @@ type direct struct {
 	clientHelloID     tls.ClientHelloID
 }
 
+// NewRoundTripper creates a new http.RoundTripper. Close the roundtripper when no longer in use to
+// free associated resources.
+func NewRoundTripper(providers map[string]*Provider, defaultProviderID string,
+	opts RoundTripperOptions) (RoundTripper, error) {
+	return NewRoundTripperContext(context.Background(), providers, defaultProviderID, opts)
+}
+
+// NewRoundTripperContext is like NewRoundTripper, but accepts an execution context.
+func NewRoundTripperContext(ctx context.Context, providers map[string]*Provider,
+	defaultProviderID string, opts RoundTripperOptions) (RoundTripper, error) {
+
+	var cache *masqueradeCache
+	if opts.CacheFile != "" {
+		cache = globalCacheManager.get(
+			opts.CacheFile,
+			defaultMaxCacheSize,
+			defaultMaxAllowedCachedAge,
+			defaultCacheSaveInterval)
+	}
+
+	size := 0
+	for _, p := range providers {
+		size += len(p.Masquerades)
+	}
+	if opts.DialTransport == nil {
+		opts.DialTransport = netx.DialContext
+	}
+	d := &direct{
+		certPool:          opts.CertPool,
+		candidates:        make(chan masquerade, size),
+		masquerades:       make(chan masquerade, size),
+		cache:             cache,
+		defaultProviderID: defaultProviderID,
+		providers:         make(map[string]*Provider),
+		ready:             make(chan struct{}),
+		dialTransport:     opts.DialTransport,
+		clientHelloID:     opts.ClientHelloID,
+	}
+	// copy providers
+	for k, p := range providers {
+		d.providers[k] = NewProvider(
+			p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns)
+	}
+	pulledFromCache, err := d.initFromCache()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize from cache file: %w", err)
+	}
+	d.loadCandidates()
+	toVet := numberToVetInitially - pulledFromCache
+	if toVet > 0 {
+		d.vet(toVet)
+	} else {
+		log.Debugf("Not vetting any masquerades because we have enough cached in %s", cache.filename)
+		d.signalReady()
+	}
+	select {
+	case <-d.ready:
+		return d, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // Returns errorTimeout if the direct cannot be initialized in the provided timeout.
 func newDirect(
 	ctx context.Context, providers map[string]*Provider, defaultProviderID string,
-	toVet int, cache *masqueradeCache, opts DirectOptions) (*direct, error) {
+	toVet int, cache *masqueradeCache, opts RoundTripperOptions) (*direct, error) {
 
 	size := 0
 	for _, p := range providers {
@@ -384,6 +454,12 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 	}
 
 	return nil, nil, errors.New("Could not complete request even with retries")
+}
+
+// Close and free associated resources. Implements io.Closer, but always returns nil.
+func (d *direct) Close() error {
+	globalCacheManager.closeHandle(d.cache)
+	return nil
 }
 
 func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
