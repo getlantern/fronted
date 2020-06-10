@@ -27,8 +27,10 @@ func TestDirectDomainFronting(t *testing.T) {
 	if !assert.NoError(t, err, "Unable to create temp dir") {
 		return
 	}
-	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
+	defer os.RemoveAll(dir)
+	defer DefaultContext.closeCache(cacheFile)
+
 	doTestDomainFronting(t, cacheFile)
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile
