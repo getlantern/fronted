@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -130,16 +129,12 @@ func (fctx *FrontingContext) NewDirect(ctx context.Context, opts DirectOptions) 
 	var (
 		cache    *masqueradeCache
 		newCache bool
-		err      error
 	)
 	if opts.CacheFile != "" {
-		cache, newCache, err = fctx.getCache(opts.CacheFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize cache file: %w", err)
-		}
+		cache, newCache = fctx.getCache(opts.CacheFile)
 	}
 
-	d, err := newDirect(ctx, providers, defaultProviderID, cache, opts)
+	d, err := newDirect(ctx, providers, defaultProviderID, numberToVetInitially, cache, opts)
 	if err != nil && newCache {
 		fctx.closeCache(opts.CacheFile)
 	}
@@ -163,19 +158,15 @@ func (fctx *FrontingContext) Close() error {
 	return nil
 }
 
-func (fctx *FrontingContext) getCache(filename string) (c *masqueradeCache, isNew bool, err error) {
+func (fctx *FrontingContext) getCache(filename string) (c *masqueradeCache, isNew bool) {
 	fctx.cachesLock.Lock()
 	defer fctx.cachesLock.Unlock()
 	if c, ok := fctx.caches[filename]; ok {
-		return c, false, nil
+		return c, false
 	}
-	c, err = newMasqueradeCache(
-		filename, defaultMaxCacheSize, defaultMaxAllowedCachedAge, defaultCacheSaveInterval)
-	if err != nil {
-		return nil, false, err
-	}
+	c = newMasqueradeCache(filename, defaultMaxCacheSize, defaultMaxAllowedCachedAge, defaultCacheSaveInterval)
 	fctx.caches[filename] = c
-	return c, true, nil
+	return c, true
 }
 
 func (fctx *FrontingContext) closeCache(filename string) {

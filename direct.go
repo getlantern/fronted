@@ -71,7 +71,7 @@ type direct struct {
 // Returns errorTimeout if the direct cannot be initialized in the provided timeout.
 func newDirect(
 	ctx context.Context, providers map[string]*Provider, defaultProviderID string,
-	cache *masqueradeCache, opts DirectOptions) (*direct, error) {
+	toVet int, cache *masqueradeCache, opts DirectOptions) (*direct, error) {
 
 	size := 0
 	for _, p := range providers {
@@ -96,15 +96,14 @@ func newDirect(
 		d.providers[k] = NewProvider(
 			p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns)
 	}
-	numberToVet := numberToVetInitially
 	pulledFromCache, err := d.initFromCache()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize from cache file: %w", err)
 	}
-	numberToVet -= pulledFromCache
+	toVet -= pulledFromCache
 	d.loadCandidates()
-	if numberToVet > 0 {
-		d.vet(numberToVet)
+	if toVet > 0 {
+		d.vet(toVet)
 	} else {
 		log.Debugf("Not vetting any masquerades because we have enough cached in %s", cache.filename)
 		d.signalReady()

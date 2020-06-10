@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -19,13 +20,7 @@ type masqueradeCache struct {
 	closeOnce      sync.Once
 }
 
-func newMasqueradeCache(
-	filename string, maxSize int, maxAge, saveInterval time.Duration) (*masqueradeCache, error) {
-
-	_, err := os.Stat(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat cache file: %w", err)
-	}
+func newMasqueradeCache(filename string, maxSize int, maxAge, saveInterval time.Duration) *masqueradeCache {
 	c := &masqueradeCache{
 		filename, maxSize, maxAge, []masquerade{}, sync.Mutex{}, make(chan struct{}), sync.Once{},
 	}
@@ -47,25 +42,39 @@ func newMasqueradeCache(
 			}
 		}
 	}()
-	return c, nil
+	return c
 }
 
 func (c *masqueradeCache) read() ([]masquerade, error) {
+	c.newEntriesLock.Lock()
+	defer c.newEntriesLock.Unlock()
+	return c.readUnsafe()
+
+}
+
+func (c *masqueradeCache) readUnsafe() ([]masquerade, error) {
+	inMemory := make([]masquerade, len(c.newEntries))
+	copy(inMemory, c.newEntries)
+
+	if _, err := os.Stat(c.filename); errors.Is(err, os.ErrNotExist) {
+		return inMemory, nil
+	}
 	f, err := os.Open(c.filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open cache file (%s) for reading: %w", c.filename, err)
 	}
 	defer f.Close()
-	_m := []masquerade{}
-	if err := json.NewDecoder(f).Decode(&_m); err != nil {
+	fromDisk := []masquerade{}
+	if err := json.NewDecoder(f).Decode(&fromDisk); err != nil {
 		return nil, fmt.Errorf("failed to decode cache file: %w", err)
 	}
 	m := []masquerade{}
-	for _, masq := range _m {
+	for _, masq := range fromDisk {
 		if time.Since(masq.LastVetted) < c.maxAge {
 			m = append(m, masq)
 		}
 	}
+	m = append(m, inMemory...)
 	return m, nil
 }
 
@@ -86,11 +95,10 @@ func (c *masqueradeCache) saveNewEntries() error {
 	if len(c.newEntries) == 0 {
 		return nil
 	}
-	current, err := c.read()
+	current, err := c.readUnsafe()
 	if err != nil {
 		return fmt.Errorf("failed to read current entries: %w", err)
 	}
-	current = append(current, c.newEntries...)
 	if len(current) > c.maxSize {
 		current = current[:c.maxSize]
 	}
@@ -101,6 +109,7 @@ func (c *masqueradeCache) saveNewEntries() error {
 	if err := ioutil.WriteFile(c.filename, b, 0644); err != nil {
 		return fmt.Errorf("failed to write updates to disk: %w", err)
 	}
+	c.newEntries = []masquerade{}
 	return nil
 }
 

@@ -92,7 +92,7 @@ func TestLoadCandidates(t *testing.T) {
 		}
 	}
 
-	d, err := newDirect(context.Background(), providers, "", nil, DirectOptions{})
+	d, err := newDirect(context.Background(), providers, "", numberToVetInitially, nil, DirectOptions{})
 	require.NoError(t, err)
 	close(d.candidates)
 
