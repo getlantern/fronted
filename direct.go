@@ -35,22 +35,25 @@ var (
 	log = golog.LoggerFor("fronted")
 )
 
-// DirectOptions defines optional paramaters for NewDirect and FrontingContext.NewDirect.
+// DirectOptions defines optional paramaters for NewDirect and
+// FrontingContext.NewDirect.
 type DirectOptions struct {
-	// CertPool sets the root CAs used to verify server certificates. If nil, the host's root CA set
-	// will be used.
+	// CertPool sets the root CAs used to verify server certificates. If nil,
+	// the host's root CA set will be used.
 	CertPool *x509.CertPool
 
-	// CacheFile, if provided, will be used to cache providers. Multiple calls to NewDirect may be
-	// made with the same cache file. However, cache files should *not* be shared across contexts.
+	// CacheFile, if provided, will be used to cache providers. Multiple calls
+	// to NewDirect may be made with the same cache file. However, cache files
+	// should *not* be shared across contexts.
 	CacheFile string
 
-	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic. See
-	// https://pkg.go.dev/github.com/refraction-networking/utls?tab=doc#pkg-variables
+	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic.
+	// See https://pkg.go.dev/github.com/refraction-networking/utls?tab=doc#pkg-variables
 	ClientHelloID tls.ClientHelloID
 
-	// DialTransport is used to establish the transport connection to the masquerade. This will
-	// almost certainly be a TCP connection. If nil, getlantern/netx.DialContext will be used.
+	// DialTransport is used to establish the transport connection to the
+	// masquerade. This will almost certainly be a TCP connection. If nil,
+	// getlantern/netx.DialContext will be used.
 	DialTransport func(ctx context.Context, network, address string) (net.Conn, error)
 }
 

@@ -2,15 +2,12 @@ package fronted
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
-	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/getlantern/eventual"
-	tls "github.com/refraction-networking/utls"
 )
 
 var (
@@ -26,24 +23,6 @@ func (err ErrorTimeout) Error() string {
 	return err.msg
 }
 
-// ConfigureOptions is used in Configure and FrontingContext.Configure.
-type ConfigureOptions struct {
-	// CertPool sets the root CAs used to verify server certificates. If nil, the host's root CA set
-	// will be used.
-	CertPool *x509.CertPool
-
-	// CacheFile, if provided, will be used to cache providers.
-	CacheFile string
-
-	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic. See
-	// https://pkg.go.dev/github.com/refraction-networking/utls?tab=doc#pkg-variables
-	ClientHelloID tls.ClientHelloID
-
-	// DialTransport is used to establish the transport connection to the masquerade. This will
-	// almost certainly be a TCP connection. If nil, getlantern/netx.DialContext will be used.
-	DialTransport func(ctx context.Context, network, address string) (net.Conn, error)
-}
-
 // Configure sets the masquerades to use in the default context. The
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (e.g. in a cache file).
@@ -54,7 +33,7 @@ func Configure(providers map[string]*Provider, defaultProviderID string) {
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
-// The default context must be configured to create a RoundTripper.
+// The default context must be configured in order to create a RoundTripper.
 func NewDirect(ctx context.Context, opts DirectOptions) (http.RoundTripper, error) {
 	return DefaultContext.NewDirect(ctx, opts)
 }
@@ -100,7 +79,7 @@ func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultPr
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
-// The fronting context must be configured to create a RoundTripper.
+// The fronting context must be configured in order to create a RoundTripper.
 func (fctx *FrontingContext) NewDirect(ctx context.Context, opts DirectOptions) (http.RoundTripper, error) {
 	// Note: eventual.Value.Get(-1) will wait forever. If no deadline is set, this is what we want.
 	timeout := time.Duration(-1)
