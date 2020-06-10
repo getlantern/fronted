@@ -3,6 +3,7 @@ package fronted
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -54,12 +55,9 @@ func Configure(providers map[string]*Provider, defaultProviderID string) {
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
-// The default context must be configured before a RoundTripper can be created.
-//
-// Returns ErrorTimeout if Configure is not called in time or a working
-// masquerade is not found in time.
-func NewDirect(timeout time.Duration, opts DirectOptions) (http.RoundTripper, error) {
-	return DefaultContext.NewDirect(timeout, opts)
+// The default context must be configured to create a RoundTripper.
+func NewDirect(ctx context.Context, opts DirectOptions) (http.RoundTripper, error) {
+	return DefaultContext.NewDirect(ctx, opts)
 }
 
 func NewFrontingContext(name string) *FrontingContext {
@@ -82,16 +80,19 @@ type FrontingContext struct {
 func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultProviderID string) error {
 	log.Tracef("Configuring fronted %s context", fctx.name)
 
-	// Sanity checks
+	// Sanity check inputs as NewDirect expects valid values.
 	if providers == nil || len(providers) == 0 {
-		return fmt.Errorf("no fronted providers for %s context", fctx.name)
+		return errors.New("providers are required")
+	}
+	if defaultProviderID == "" {
+		return errors.New("default provider ID is required")
 	}
 	size := 0
 	for _, p := range providers {
 		size += len(p.Masquerades)
 	}
 	if size == 0 {
-		return fmt.Errorf("no masquerades for %s context", fctx.name)
+		return errors.New("no masquerades in providers")
 	}
 
 	fctx.providers.Set(providers)
@@ -100,20 +101,30 @@ func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultPr
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
-// The context must be configured before a RoundTripper can be created.
-//
-// Returns ErrorTimeout if Configure is not called in time or a working
-// masquerade is not found in time.
-func (fctx *FrontingContext) NewDirect(timeout time.Duration, opts DirectOptions) (http.RoundTripper, error) {
-	// TODO: consider using context.Context instead of timeout
-	start := time.Now()
-
+// The fronting context must be configured to create a RoundTripper.
+func (fctx *FrontingContext) NewDirect(ctx context.Context, opts DirectOptions) (http.RoundTripper, error) {
+	// Note: eventual.Value.Get(-1) will wait forever. If no deadline is set, this is what we want.
+	timeout := time.Duration(-1)
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+	}
 	providersCh, defaultProviderIDCh := make(chan interface{}), make(chan interface{})
 	go func() { v, _ := fctx.providers.Get(timeout); providersCh <- v }()
 	go func() { v, _ := fctx.defaultProviderID.Get(timeout); defaultProviderIDCh <- v }()
-	providers, defaultProviderID := <-providersCh, <-defaultProviderIDCh
-	if providers == nil || defaultProviderID == nil {
-		return nil, ErrorTimeout{"timed out waiting for configuration"}
+
+	var (
+		providers         map[string]*Provider
+		defaultProviderID string
+	)
+	for providers == nil || defaultProviderID == "" {
+		select {
+		case _providers := <-providersCh:
+			providers = _providers.(map[string]*Provider)
+		case _defaultProviderID := <-defaultProviderIDCh:
+			defaultProviderID = _defaultProviderID.(string)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	var (
@@ -128,28 +139,11 @@ func (fctx *FrontingContext) NewDirect(timeout time.Duration, opts DirectOptions
 		}
 	}
 
-	type newDirectResult struct {
-		direct *direct
-		err    error
+	d, err := newDirect(ctx, providers, defaultProviderID, cache, opts)
+	if err != nil && newCache {
+		fctx.closeCache(opts.CacheFile)
 	}
-	resultCh := make(chan newDirectResult)
-	go func() {
-		d, err := newDirect(providers.(map[string]*Provider), defaultProviderID.(string), cache, opts)
-		resultCh <- newDirectResult{d, err}
-	}()
-
-	select {
-	case r := <-resultCh:
-		if r.err == nil && newCache {
-			fctx.closeCache(opts.CacheFile)
-		}
-		return r.direct, r.err
-	case <-time.After(timeout - time.Since(start)):
-		if newCache {
-			fctx.closeCache(opts.CacheFile)
-		}
-		return nil, ErrorTimeout{"timed out waiting for working masquerade"}
-	}
+	return d, err
 }
 
 // Close the context and any associated resources. RoundTrippers created via NewDirect will continue

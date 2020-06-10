@@ -70,7 +70,7 @@ type direct struct {
 
 // Returns errorTimeout if the direct cannot be initialized in the provided timeout.
 func newDirect(
-	providers map[string]*Provider, defaultProviderID string,
+	ctx context.Context, providers map[string]*Provider, defaultProviderID string,
 	cache *masqueradeCache, opts DirectOptions) (*direct, error) {
 
 	size := 0
@@ -111,9 +111,12 @@ func newDirect(
 		log.Debugf("Not vetting any masquerades because we have enough cached in %s", cache.filename)
 		d.signalReady()
 	}
-	// TODO: can this block forever?
-	<-d.ready
-	return d, nil
+	select {
+	case <-d.ready:
+		return d, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (d *direct) initFromCache(c *masqueradeCache) (submitted int, err error) {
