@@ -35,26 +35,117 @@ var (
 	log = golog.LoggerFor("fronted")
 )
 
-// direct is an implementation of http.RoundTripper
-type direct struct {
-	certPool            *x509.CertPool
-	candidates          chan masquerade
-	masquerades         chan masquerade
-	maxAllowedCachedAge time.Duration
-	maxCacheSize        int
-	cacheSaveInterval   time.Duration
-	toCache             chan masquerade
-	defaultProviderID   string
-	providers           map[string]*Provider
-	ready               chan struct{}
-	readyOnce           sync.Once
-	dialTransport       func(ctx context.Context, network, address string) (net.Conn, error)
-	clientHelloID       tls.ClientHelloID
+// DirectOptions defines optional paramaters for NewDirect and FrontingContext.NewDirect.
+type DirectOptions struct {
+	// CertPool sets the root CAs used to verify server certificates. If nil, the host's root CA set
+	// will be used.
+	CertPool *x509.CertPool
+
+	// CacheFile, if provided, will be used to cache providers. Multiple calls to NewDirect may be
+	// made with the same cache file. However, cache files should *not* be shared across contexts.
+	CacheFile string
+
+	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic. See
+	// https://pkg.go.dev/github.com/refraction-networking/utls?tab=doc#pkg-variables
+	ClientHelloID tls.ClientHelloID
+
+	// DialTransport is used to establish the transport connection to the masquerade. This will
+	// almost certainly be a TCP connection. If nil, getlantern/netx.DialContext will be used.
+	DialTransport func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-func (d *direct) loadCandidates(initial map[string]*Provider) {
+// direct is an implementation of http.RoundTripper
+type direct struct {
+	certPool          *x509.CertPool
+	candidates        chan masquerade
+	masquerades       chan masquerade
+	cache             *masqueradeCache
+	defaultProviderID string
+	providers         map[string]*Provider
+	ready             chan struct{}
+	readyOnce         sync.Once
+	dialTransport     func(ctx context.Context, network, address string) (net.Conn, error)
+	clientHelloID     tls.ClientHelloID
+}
+
+// Returns errorTimeout if the direct cannot be initialized in the provided timeout.
+func newDirect(
+	providers map[string]*Provider, defaultProviderID string,
+	cache *masqueradeCache, opts DirectOptions) (*direct, error) {
+
+	size := 0
+	for _, p := range providers {
+		size += len(p.Masquerades)
+	}
+	if opts.DialTransport == nil {
+		opts.DialTransport = netx.DialContext
+	}
+	d := &direct{
+		certPool:          opts.CertPool,
+		candidates:        make(chan masquerade, size),
+		masquerades:       make(chan masquerade, size),
+		cache:             cache,
+		defaultProviderID: defaultProviderID,
+		providers:         make(map[string]*Provider),
+		ready:             make(chan struct{}),
+		dialTransport:     opts.DialTransport,
+		clientHelloID:     opts.ClientHelloID,
+	}
+	// copy providers
+	for k, p := range providers {
+		d.providers[k] = NewProvider(
+			p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns)
+	}
+	numberToVet := numberToVetInitially
+	if cache != nil {
+		submittedFromCache, err := d.initFromCache(cache)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize from cache file: %w", err)
+		}
+		numberToVet -= submittedFromCache
+	}
+	d.loadCandidates()
+	if numberToVet > 0 {
+		d.vet(numberToVet)
+	} else {
+		log.Debugf("Not vetting any masquerades because we have enough cached in %s", cache.filename)
+		d.signalReady()
+	}
+	// TODO: can this block forever?
+	<-d.ready
+	return d, nil
+}
+
+func (d *direct) initFromCache(c *masqueradeCache) (submitted int, err error) {
+	inCache, err := c.read()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read cache file: %w", err)
+	}
+	log.Debugf("Initializing from cache of %d masquerades", len(inCache))
+
+	for _, m := range inCache {
+		// Fill in default for masquerades lacking a provider ID.
+		if m.ProviderID == "" {
+			m.ProviderID = d.defaultProviderID
+		}
+		if _, ok := d.providers[m.ProviderID]; !ok {
+			// Skip entries for providers that are not configured.
+			log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
+			continue
+		}
+		select {
+		case d.masquerades <- m:
+			submitted++
+		default:
+			// Channel is full, that's okay.
+		}
+	}
+	return submitted, nil
+}
+
+func (d *direct) loadCandidates() {
 	log.Debug("Loading candidates")
-	for key, p := range initial {
+	for key, p := range d.providers {
 		arr := p.Masquerades
 		size := len(arr)
 		log.Tracef("Adding %d candidates for %v", size, key)
@@ -70,6 +161,8 @@ func (d *direct) loadCandidates(initial map[string]*Provider) {
 
 		for _, c := range sh {
 			log.Trace("Adding candidate")
+			// Note: we ensured in newDirect that the buffer for d.candidates is large enough to
+			// hold all masquerades in d.providers.
 			d.candidates <- masquerade{Masquerade: *c, ProviderID: key}
 		}
 	}
@@ -96,10 +189,8 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 
 func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	d := &direct{
-		certPool:            pool,
-		dialTransport:       netx.DialContext,
-		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
-		maxCacheSize:        defaultMaxCacheSize,
+		certPool:      pool,
+		dialTransport: netx.DialContext,
 	}
 	conn, _, err := d.doDial(m)
 	if err != nil {
@@ -360,12 +451,8 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 					m.LastVetted = time.Now()
 					// Requeue the working connection to masquerades
 					d.masquerades <- m
-					select {
-					case d.toCache <- m:
-						// ok
-					default:
-						// cache writing has fallen behind, drop masquerade
-						log.Debug("Dropping masquerade: cache writing is behind")
+					if d.cache != nil {
+						d.cache.write(m)
 					}
 				} else {
 					go d.vetOneUntilGood()

@@ -2,103 +2,109 @@ package fronted
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"sync"
 	"time"
 )
 
-var (
-	// zero value indicates end of cache filling
-	fillSentinel masquerade
-)
-
-func (d *direct) initCaching(cacheFile string) int {
-	cache := d.prepopulateMasquerades(cacheFile)
-	prevetted := len(cache)
-	go d.fillCache(cache, cacheFile)
-	return prevetted
+type masqueradeCache struct {
+	filename       string
+	maxSize        int
+	maxAge         time.Duration
+	newEntries     []masquerade
+	newEntriesLock sync.Mutex
+	done           chan struct{}
+	closeOnce      sync.Once
 }
 
-func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
-	var cache []masquerade
-	file, err := os.Open(cacheFile)
-	if err == nil {
-		log.Debugf("Attempting to prepopulate masquerades from cache")
-		defer file.Close()
-		var masquerades []masquerade
-		err := json.NewDecoder(file).Decode(&masquerades)
-		if err != nil {
-			log.Errorf("Error prepopulating cached masquerades: %v", err)
-			return cache
-		}
+func newMasqueradeCache(
+	filename string, maxSize int, maxAge, saveInterval time.Duration) (*masqueradeCache, error) {
 
-		log.Debugf("Cache contained %d masquerades", len(masquerades))
-		now := time.Now()
-		for _, m := range masquerades {
-			if now.Sub(m.LastVetted) < d.maxAllowedCachedAge {
-				// fill in default for masquerades lacking provider id
-				if m.ProviderID == "" {
-					m.ProviderID = d.defaultProviderID
-				}
-				// Skip entries for providers that are not configured.
-				_, ok := d.providers[m.ProviderID]
-				if !ok {
-					log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
-					continue
-				}
-				select {
-				case d.masquerades <- m:
-					// submitted
-					cache = append(cache, m)
-				default:
-					// channel full, that's okay
-				}
-			}
-		}
+	_, err := os.Stat(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat cache file: %w", err)
 	}
-
-	return cache
-}
-
-func (d *direct) fillCache(cache []masquerade, cacheFile string) {
-	saveTicker := time.NewTicker(d.cacheSaveInterval)
-	defer saveTicker.Stop()
-	cacheChanged := false
-	for {
-		select {
-		case m := <-d.toCache:
-			if m == fillSentinel {
-				log.Debug("Cache closed, stop filling")
+	c := &masqueradeCache{
+		filename, maxSize, maxAge, []masquerade{}, sync.Mutex{}, make(chan struct{}), sync.Once{},
+	}
+	go func() {
+		ticker := time.NewTicker(saveInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.done:
+				// Flush to disk.
+				if err := c.saveNewEntries(); err != nil {
+					log.Errorf("save routine encountered error saving while closing: %v", err)
+				}
 				return
+			case <-ticker.C:
+				if err := c.saveNewEntries(); err != nil {
+					log.Errorf("save routine encountered error: %v", err)
+				}
 			}
-			log.Debugf("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
-			cache = append(cache, m)
-			cacheChanged = true
-		case <-saveTicker.C:
-			if !cacheChanged {
-				continue
-			}
-			log.Debug("Saving updated masquerade cache")
-			// Truncate cache to max length if necessary
-			if len(cache) > d.maxCacheSize {
-				truncated := make([]masquerade, d.maxCacheSize)
-				copy(truncated, cache[len(cache)-d.maxCacheSize:])
-				cache = truncated
-			}
-			b, err := json.Marshal(cache)
-			if err != nil {
-				log.Errorf("Unable to marshal cache to JSON: %v", err)
-				break
-			}
-			err = ioutil.WriteFile(cacheFile, b, 0644)
-			if err != nil {
-				log.Errorf("Unable to save cache to disk: %v", err)
-			}
-			cacheChanged = false
 		}
+	}()
+	return c, nil
+}
+
+func (c *masqueradeCache) read() ([]masquerade, error) {
+	f, err := os.Open(c.filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open cache file (%s) for reading: %w", c.filename, err)
+	}
+	defer f.Close()
+	_m := []masquerade{}
+	if err := json.NewDecoder(f).Decode(&_m); err != nil {
+		return nil, fmt.Errorf("failed to decode cache file: %w", err)
+	}
+	m := []masquerade{}
+	for _, masq := range _m {
+		if time.Since(masq.LastVetted) < c.maxAge {
+			m = append(m, masq)
+		}
+	}
+	return m, nil
+}
+
+func (c *masqueradeCache) write(m masquerade) {
+	select {
+	case <-c.done:
+		// No-op if the cache is closed.
+	default:
+		c.newEntriesLock.Lock()
+		c.newEntries = append(c.newEntries, m)
+		c.newEntriesLock.Unlock()
 	}
 }
 
-func (d *direct) closeCache() {
-	d.toCache <- fillSentinel
+func (c *masqueradeCache) saveNewEntries() error {
+	c.newEntriesLock.Lock()
+	defer c.newEntriesLock.Unlock()
+	if len(c.newEntries) == 0 {
+		return nil
+	}
+	current, err := c.read()
+	if err != nil {
+		return fmt.Errorf("failed to read current entries: %w", err)
+	}
+	current = append(current, c.newEntries...)
+	if len(current) > c.maxSize {
+		current = current[:c.maxSize]
+	}
+	b, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("failed to marshal entries as JSON: %w", err)
+	}
+	if err := ioutil.WriteFile(c.filename, b, 0644); err != nil {
+		return fmt.Errorf("failed to write updates to disk: %w", err)
+	}
+	return nil
+}
+
+func (c *masqueradeCache) close() {
+	log.Debugf("cache at %s closed", c.filename)
+	c.closeOnce.Do(func() { close(c.done) })
 }
