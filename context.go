@@ -58,6 +58,11 @@ type FrontingContext struct {
 	defaultProviderID eventual.Value // string
 }
 
+// Name assigned to this context.
+func (fctx *FrontingContext) Name() string {
+	return fctx.name
+}
+
 // Configure sets the masquerades to use. The defaultProviderID is used when a
 // masquerade without a provider is encountered (e.g. in a cache file).
 func (fctx *FrontingContext) Configure(providers map[string]*Provider, defaultProviderID string) error {
