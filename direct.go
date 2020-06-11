@@ -35,8 +35,8 @@ var (
 	log = golog.LoggerFor("fronted")
 )
 
-// RoundTripper unifies http.RoundTripper and io.Closer.
-type RoundTripper interface {
+// RoundTripCloser unifies http.RoundTripper and io.Closer.
+type RoundTripCloser interface {
 	http.RoundTripper
 	io.Closer
 }
@@ -50,8 +50,7 @@ type RoundTripperOptions struct {
 	CertPool *x509.CertPool
 
 	// CacheFile, if provided, will be used to cache providers. Multiple calls
-	// to NewDirect may be made with the same cache file. However, cache files
-	// should *not* be shared across contexts.
+	// to NewRoundTripper may be made with the same cache file.
 	CacheFile string
 
 	// ClientHelloID, if provided, specifies the ID of a ClientHello to mimic.
@@ -64,7 +63,7 @@ type RoundTripperOptions struct {
 	DialTransport func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// direct is an implementation of http.RoundTripper
+// direct is an implementation of RoundTripCloser.
 type direct struct {
 	certPool          *x509.CertPool
 	candidates        chan masquerade
@@ -80,14 +79,16 @@ type direct struct {
 
 // NewRoundTripper creates a new http.RoundTripper. Close the roundtripper when no longer in use to
 // free associated resources.
+//
+// Masquerades must be vetted, so this function may block.
 func NewRoundTripper(providers map[string]*Provider, defaultProviderID string,
-	opts RoundTripperOptions) (RoundTripper, error) {
+	opts RoundTripperOptions) (RoundTripCloser, error) {
 	return NewRoundTripperContext(context.Background(), providers, defaultProviderID, opts)
 }
 
 // NewRoundTripperContext is like NewRoundTripper, but accepts an execution context.
 func NewRoundTripperContext(ctx context.Context, providers map[string]*Provider,
-	defaultProviderID string, opts RoundTripperOptions) (RoundTripper, error) {
+	defaultProviderID string, opts RoundTripperOptions) (RoundTripCloser, error) {
 
 	var cache *masqueradeCache
 	if opts.CacheFile != "" {
