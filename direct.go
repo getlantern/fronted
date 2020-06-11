@@ -35,10 +35,12 @@ var (
 	log = golog.LoggerFor("fronted")
 )
 
-// RoundTripCloser unifies http.RoundTripper and io.Closer.
-type RoundTripCloser interface {
+// A RoundTripper unifies http.RoundTripper and io.Closer. A RoundTripper also has a RoundTripHijack
+// method to support connection hijacking.
+type RoundTripper interface {
 	http.RoundTripper
 	io.Closer
+	RoundTripHijack(req *http.Request) (*http.Response, net.Conn, error)
 }
 
 // RoundTripperOptions defines optional paramaters for NewDirect and
@@ -82,13 +84,13 @@ type direct struct {
 //
 // Masquerades must be vetted, so this function may block.
 func NewRoundTripper(providers map[string]*Provider, defaultProviderID string,
-	opts RoundTripperOptions) (RoundTripCloser, error) {
+	opts RoundTripperOptions) (RoundTripper, error) {
 	return NewRoundTripperContext(context.Background(), providers, defaultProviderID, opts)
 }
 
 // NewRoundTripperContext is like NewRoundTripper, but accepts an execution context.
 func NewRoundTripperContext(ctx context.Context, providers map[string]*Provider,
-	defaultProviderID string, opts RoundTripperOptions) (RoundTripCloser, error) {
+	defaultProviderID string, opts RoundTripperOptions) (RoundTripper, error) {
 
 	var cache *masqueradeCache
 	if opts.CacheFile != "" {
