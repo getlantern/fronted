@@ -18,7 +18,7 @@ import (
 	"github.com/getlantern/golog"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
-	"github.com/getlantern/tlsdialer"
+	"github.com/getlantern/tlsdialer/v3"
 	tls "github.com/refraction-networking/utls"
 )
 
