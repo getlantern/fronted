@@ -167,15 +167,15 @@ func TestHostAliasesBasic(t *testing.T) {
 	}{
 		{
 			"http://fff.cloudsack.biz/foo",
-			"Get http://fff.cloudsack.biz/foo: No alias for host fff.cloudsack.biz",
+			`Get "http://fff.cloudsack.biz/foo": No alias for host fff.cloudsack.biz`,
 		},
 		{
 			"http://fff.cloudsack.biz:1234/bar?x=y&z=w",
-			"Get http://fff.cloudsack.biz:1234/bar?x=y&z=w: No alias for host fff.cloudsack.biz",
+			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": No alias for host fff.cloudsack.biz`,
 		},
 		{
 			"https://www.google.com",
-			"Get https://www.google.com: No alias for host www.google.com",
+			`Get "https://www.google.com": No alias for host www.google.com`,
 		},
 	}
 
@@ -395,27 +395,27 @@ func TestPassthrough(t *testing.T) {
 	}{
 		{
 			"http://www.notok.cloudsack.biz",
-			"Get http://www.notok.cloudsack.biz: No alias for host www.notok.cloudsack.biz",
+			`Get "http://www.notok.cloudsack.biz": No alias for host www.notok.cloudsack.biz`,
 		},
 		{
 			"http://ok.cloudsack.biz",
-			"Get http://ok.cloudsack.biz: No alias for host ok.cloudsack.biz",
+			`Get "http://ok.cloudsack.biz": No alias for host ok.cloudsack.biz`,
 		},
 		{
 			"http://www.abc.cloudsack.biz",
-			"Get http://www.abc.cloudsack.biz: No alias for host www.abc.cloudsack.biz",
+			`Get "http://www.abc.cloudsack.biz": No alias for host www.abc.cloudsack.biz`,
 		},
 		{
 			"http://noabc.cloudsack.biz",
-			"Get http://noabc.cloudsack.biz: No alias for host noabc.cloudsack.biz",
+			`Get "http://noabc.cloudsack.biz": No alias for host noabc.cloudsack.biz`,
 		},
 		{
 			"http://cloudsack.biz",
-			"Get http://cloudsack.biz: No alias for host cloudsack.biz",
+			`Get "http://cloudsack.biz": No alias for host cloudsack.biz`,
 		},
 		{
 			"https://www.google.com",
-			"Get https://www.google.com: No alias for host www.google.com",
+			`Get "https://www.google.com": No alias for host www.google.com`,
 		},
 	}
 
@@ -510,7 +510,7 @@ func TestCustomValidators(t *testing.T) {
 	// This error indicates that the validator has discarded all masquerades.
 	// Each test starts with one masquerade, which is vetted during the
 	// call to NewDirect.
-	masqueradesExhausted := fmt.Sprintf("Get %s: Could not dial any masquerade?", testURL)
+	masqueradesExhausted := fmt.Sprintf(`Get "%v": Could not dial any masquerade?`, testURL)
 
 	tests := []struct {
 		responseCode  int
