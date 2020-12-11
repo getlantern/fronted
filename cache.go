@@ -3,14 +3,14 @@ package fronted
 import (
 	"encoding/json"
 	"io/ioutil"
-	"os"
 	"time"
 )
 
-var (
-	// zero value indicates end of cache filling
-	fillSentinel masquerade
-)
+type cacheOp struct {
+	m      masquerade
+	remove bool
+	close  bool
+}
 
 func (d *direct) initCaching(cacheFile string) int {
 	cache := d.prepopulateMasquerades(cacheFile)
@@ -21,12 +21,11 @@ func (d *direct) initCaching(cacheFile string) int {
 
 func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 	var cache []masquerade
-	file, err := os.Open(cacheFile)
+	bytes, err := ioutil.ReadFile(cacheFile)
 	if err == nil {
 		log.Debugf("Attempting to prepopulate masquerades from cache")
-		defer file.Close()
 		var masquerades []masquerade
-		err := json.NewDecoder(file).Decode(&masquerades)
+		err := json.Unmarshal(bytes, &masquerades)
 		if err != nil {
 			log.Errorf("Error prepopulating cached masquerades: %v", err)
 			return cache
@@ -47,7 +46,7 @@ func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 					continue
 				}
 				select {
-				case d.masquerades <- m:
+				case d.cached <- m:
 					// submitted
 					cache = append(cache, m)
 				default:
@@ -66,13 +65,26 @@ func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 	cacheChanged := false
 	for {
 		select {
-		case m := <-d.toCache:
-			if m == fillSentinel {
+		case op := <-d.toCache:
+			if op.close {
 				log.Debug("Cache closed, stop filling")
 				return
 			}
-			log.Debugf("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
-			cache = append(cache, m)
+			m := op.m
+			if op.remove {
+				newCache := make([]masquerade, len(cache))
+				for _, existing := range cache {
+					if existing.Domain == m.Domain && existing.IpAddress == m.IpAddress {
+						log.Debugf("Removing masquerade for %v (%v)", m.Domain, m.IpAddress)
+					} else {
+						newCache = append(newCache, existing)
+					}
+				}
+				cache = newCache
+			} else {
+				log.Debugf("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
+				cache = append(cache, m)
+			}
 			cacheChanged = true
 		case <-saveTicker.C:
 			if !cacheChanged {
@@ -100,5 +112,5 @@ func (d *direct) fillCache(cache []masquerade, cacheFile string) {
 }
 
 func (d *direct) closeCache() {
-	d.toCache <- fillSentinel
+	d.toCache <- &cacheOp{close: true}
 }
