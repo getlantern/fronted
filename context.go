@@ -85,10 +85,11 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		certPool:            pool,
 		candidates:          make(chan masquerade, size),
 		masquerades:         make(chan masquerade, size),
+		cached:              make(chan masquerade, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
-		toCache:             make(chan masquerade, defaultMaxCacheSize),
+		toCache:             make(chan *cacheOp, defaultMaxCacheSize),
 		defaultProviderID:   defaultProviderID,
 		providers:           make(map[string]*Provider),
 		ready:               make(chan struct{}),
@@ -100,17 +101,13 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns)
 	}
 
-	numberToVet := numberToVetInitially
-	if cacheFile != "" {
-		numberToVet -= d.initCaching(cacheFile)
-	}
-
 	d.loadCandidates(d.providers)
-	if numberToVet > 0 {
-		d.vet(numberToVet)
-	} else {
-		log.Debugf("Not vetting any masquerades for %s context because we have enough cached ones", fctx.name)
-		d.signalReady()
+	d.vet(numberToVetInitially)
+	if cacheFile != "" {
+		numberCached := d.initCaching(cacheFile)
+		if numberCached > 0 {
+			d.signalReady()
+		}
 	}
 	fctx.instance.Set(d)
 	return nil

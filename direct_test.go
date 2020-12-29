@@ -18,22 +18,22 @@ import (
 
 	. "github.com/getlantern/waitforserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDirectDomainFronting(t *testing.T) {
 	dir, err := ioutil.TempDir("", "direct_test")
-	if !assert.NoError(t, err, "Unable to create temp dir") {
-		return
-	}
+	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
-	doTestDomainFronting(t, cacheFile)
+	doTestDomainFronting(t, cacheFile, numberToVetInitially)
 	time.Sleep(defaultCacheSaveInterval * 2)
-	// Then try again, this time reusing the existing cacheFile
-	doTestDomainFronting(t, cacheFile)
+	// Then try again, this time reusing the existing cacheFile but a corrupted version
+	corruptMasquerades(cacheFile)
+	doTestDomainFronting(t, cacheFile, numberToVetInitially+1) // we add one because on the very first dial we're using a cached masquerade that's no good, which results in us eventually vetting an addition good masquerade
 }
 
-func doTestDomainFronting(t *testing.T, cacheFile string) {
+func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {
 
 	getURL := "http://config.example.com/proxies.yaml.gz"
 	getHost := "config.example.com"
@@ -41,9 +41,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 
 	pingHost := "ping.example.com"
 	pu, err := url.Parse(pingTestURL)
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 	pingFrontedHost := pu.Hostname()
 	pu.Host = pingHost
 	pingURL := pu.String()
@@ -56,23 +54,36 @@ func doTestDomainFronting(t *testing.T, cacheFile string) {
 	p := testProvidersWithHosts(hosts)
 	Configure(certs, p, testProviderID, cacheFile)
 
-	direct, ok := NewDirect(30 * time.Second)
-	if !assert.True(t, ok) {
-		return
-	}
-	client := &http.Client{
-		Transport: direct,
-	}
-	assert.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
+	transport, ok := NewDirect(30 * time.Second)
+	require.True(t, ok)
 
-	direct, ok = NewDirect(30 * time.Second)
-	if !assert.True(t, ok) {
-		return
+	client := &http.Client{
+		Transport: transport,
 	}
+	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
+
+	transport, ok = NewDirect(0)
+	require.True(t, ok)
 	client = &http.Client{
-		Transport: direct,
+		Transport: transport,
 	}
-	assert.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
+	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
+
+	instance, ok := DefaultContext.instance.Get(0)
+	require.True(t, ok)
+	d := instance.(*direct)
+
+	// Check the number of masquerades at the end, waiting up to 5 seconds until we get the right number
+	masqueradesAtEnd := 0
+	for i := 0; i < 100; i++ {
+		masqueradesAtEnd = len(d.masquerades)
+		if masqueradesAtEnd == expectedMasqueradesAtEnd {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	require.Equal(t, expectedMasqueradesAtEnd, masqueradesAtEnd)
+	return masqueradesAtEnd
 }
 
 func TestVet(t *testing.T) {
@@ -659,4 +670,34 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 	}
 	log.Debugf("Started %s CDN", domain)
 	return srv, addr, nil
+}
+
+func corruptMasquerades(cacheFile string) {
+	log.Debug("Corrupting masquerades")
+	data, err := ioutil.ReadFile(cacheFile)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	masquerades := make([]map[string]interface{}, 0)
+	err = json.Unmarshal(data, &masquerades)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	log.Debugf("Number of masquerades to corrupt: %d", len(masquerades))
+	for _, masquerade := range masquerades {
+		domain := masquerade["Domain"]
+		ip := masquerade["IpAddress"]
+		ipParts := strings.Split(ip.(string), ".")
+		part0, _ := strconv.Atoi(ipParts[0])
+		ipParts[0] = strconv.Itoa(part0 + 1)
+		masquerade["IpAddress"] = strings.Join(ipParts, ".")
+		log.Debugf("Corrupted masquerade %v", domain)
+	}
+	messedUp, err := json.Marshal(masquerades)
+	if err != nil {
+		return
+	}
+	ioutil.WriteFile(cacheFile, messedUp, 0644)
 }

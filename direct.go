@@ -39,10 +39,11 @@ type direct struct {
 	certPool            *x509.CertPool
 	candidates          chan masquerade
 	masquerades         chan masquerade
+	cached              chan masquerade
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
 	cacheSaveInterval   time.Duration
-	toCache             chan masquerade
+	toCache             chan *cacheOp
 	defaultProviderID   string
 	providers           map[string]*Provider
 	ready               chan struct{}
@@ -51,11 +52,13 @@ type direct struct {
 }
 
 func (d *direct) loadCandidates(initial map[string]*Provider) {
-	log.Debug("Loading candidates")
+	log.Debugf("Loading candidates for %d providers", len(initial))
+	defer log.Debug("Finished loading candidates")
+
 	for key, p := range initial {
 		arr := p.Masquerades
 		size := len(arr)
-		log.Tracef("Adding %d candidates for %v", size, key)
+		log.Debugf("Adding %d candidates for %v", size, key)
 
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
@@ -107,7 +110,7 @@ func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 }
 
 func (d *direct) vet(numberToVet int) {
-	log.Tracef("Vetting %d initial candidates in parallel", numberToVet)
+	log.Debugf("Vetting %d initial candidates in parallel", numberToVet)
 	for i := 0; i < numberToVet; i++ {
 		go d.vetOneUntilGood()
 	}
@@ -125,7 +128,9 @@ func (d *direct) vetOne() bool {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
 	log.Trace("Vetting one")
-	conn, m, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates)
+	// don't vet a new masquerade if encountering an error since vetOne will keep looping until we get a successful connection
+	vetNewOnError := false
+	conn, m, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates, d.candidates, vetNewOnError)
 	if err != nil {
 		return masqueradesRemain
 	}
@@ -311,18 +316,20 @@ func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser)
 // tell us whether the masquerade is good or not (i.e. if masquerade was good,
 // keep it, else vet a new one).
 func (d *direct) dial() (net.Conn, *masquerade, func(bool) bool, error) {
-	conn, m, masqueradeGood, _, err := d.dialWith(d.masquerades)
+	// if dialing fails, eagerly vet a new masquerade
+	vetNewOnError := true
+	conn, m, masqueradeGood, _, err := d.dialWith(d.masquerades, d.cached, vetNewOnError)
 	return conn, m, masqueradeGood, err
 }
 
-func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool) bool, bool, error) {
+func (d *direct) dialWith(vetted chan masquerade, cached chan masquerade, vetNewOnError bool) (net.Conn, *masquerade, func(bool) bool, bool, error) {
 	retryLater := make([]masquerade, 0)
 	defer func() {
 		for _, m := range retryLater {
 			// when network just recovered from offline, retryLater has more
 			// elements than the capacity of the channel.
 			select {
-			case in <- m:
+			case vetted <- m:
 			default:
 				log.Debug("Dropping masquerade: retry channel full")
 			}
@@ -330,17 +337,23 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 	}()
 
 	for {
+		// order of preference vetted -> cached -> unvetted
 		var m masquerade
 		select {
-		case m = <-in:
+		case m = <-vetted:
 			log.Trace("Got vetted masquerade")
 		default:
-			log.Trace("No vetted masquerade found, falling back to unvetted candidate")
 			select {
-			case m = <-d.candidates:
-				log.Trace("Got unvetted masquerade")
+			case m = <-cached:
+				log.Trace("Got cached masquerade")
 			default:
-				return nil, nil, nil, false, errors.New("Could not dial any masquerade?")
+				log.Trace("No vetted or cached masquerade found, falling back to unvetted candidate")
+				select {
+				case m = <-d.candidates:
+					log.Trace("Got unvetted masquerade")
+				default:
+					return nil, nil, nil, false, errors.New("Could not dial any masquerade?")
+				}
 			}
 		}
 
@@ -350,31 +363,38 @@ func (d *direct) dialWith(in chan masquerade) (net.Conn, *masquerade, func(bool)
 		// address can change frequently on CDNs, so the certificate may not match what
 		// we expect.
 		conn, retriable, err := d.doDial(&m.Masquerade)
-		if err == nil {
-			log.Trace("Returning connection")
-			masqueradeGood := func(good bool) bool {
-				if good {
-					m.LastVetted = time.Now()
-					// Requeue the working connection to masquerades
-					d.masquerades <- m
-					select {
-					case d.toCache <- m:
-						// ok
-					default:
-						// cache writing has fallen behind, drop masquerade
-						log.Debug("Dropping masquerade: cache writing is behind")
-					}
-				} else {
+		masqueradeGood := func(good bool) bool {
+			if good {
+				m.LastVetted = time.Now()
+				// Requeue the working connection to masquerades
+				d.masquerades <- m
+				select {
+				case d.toCache <- &cacheOp{m: m}:
+					// ok
+				default:
+					// cache writing has fallen behind, drop masquerade
+					log.Debug("Dropping masquerade: cache writing is behind")
+				}
+			} else {
+				go func() {
+					d.toCache <- &cacheOp{m: m, remove: true}
+				}()
+				if vetNewOnError {
 					go d.vetOneUntilGood()
 				}
-
-				return good
 			}
+
+			return good
+		}
+		if err == nil {
+			log.Trace("Returning connection")
+
 			return conn, &m, masqueradeGood, true, err
 		} else if retriable {
 			retryLater = append(retryLater, m)
 		} else {
 			log.Debugf("Dropping masquerade: non retryable error: %v", err)
+			masqueradeGood(false)
 		}
 	}
 }

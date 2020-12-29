@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCaching(t *testing.T) {
@@ -29,10 +30,11 @@ func TestCaching(t *testing.T) {
 		d := &direct{
 			candidates:          make(chan masquerade, 1000),
 			masquerades:         make(chan masquerade, 1000),
+			cached:              make(chan masquerade, 1000),
 			maxAllowedCachedAge: 250 * time.Millisecond,
-			maxCacheSize:        3,
+			maxCacheSize:        4,
 			cacheSaveInterval:   50 * time.Millisecond,
-			toCache:             make(chan masquerade, 1000),
+			toCache:             make(chan *cacheOp, 1000),
 			providers:           providers,
 			defaultProviderID:   cloudsackID,
 		}
@@ -47,16 +49,17 @@ func TestCaching(t *testing.T) {
 	md := masquerade{Masquerade{Domain: "d", IpAddress: "4"}, now, "sadcloud"} // skipped
 
 	d := makeDirect()
-	d.toCache <- ma
-	d.toCache <- mb
-	d.toCache <- mc
-	d.toCache <- md
+	d.toCache <- &cacheOp{m: ma}
+	d.toCache <- &cacheOp{m: mb}
+	d.toCache <- &cacheOp{m: mc}
+	d.toCache <- &cacheOp{m: md}
+	d.toCache <- &cacheOp{m: ma, remove: true}
 
-	readMasquerades := func() []masquerade {
+	readCached := func() []masquerade {
 		var result []masquerade
 		for {
 			select {
-			case m := <-d.masquerades:
+			case m := <-d.cached:
 				result = append(result, m)
 			default:
 				return result
@@ -73,19 +76,19 @@ func TestCaching(t *testing.T) {
 	// Reopen cache file and make sure right data was in there
 	d = makeDirect()
 	d.prepopulateMasquerades(cacheFile)
-	masquerades := readMasquerades()
-	assert.Len(t, masquerades, 2, "Wrong number of masquerades read")
-	assert.Equal(t, "b", masquerades[0].Domain, "Wrong masquerade at position 0")
-	assert.Equal(t, "2", masquerades[0].IpAddress, "Masquerade at position 0 has wrong IpAddress")
-	assert.Equal(t, testProviderID, masquerades[0].ProviderID, "Masquerade at position 0 has wrong ProviderID")
-	assert.Equal(t, "c", masquerades[1].Domain, "Wrong masquerade at position 0")
-	assert.Equal(t, "3", masquerades[1].IpAddress, "Masquerade at position 1 has wrong IpAddress")
-	assert.Equal(t, cloudsackID, masquerades[1].ProviderID, "Masquerade at position 1 has wrong ProviderID")
+	masquerades := readCached()
+	require.Len(t, masquerades, 2, "Wrong number of masquerades read")
+	require.Equal(t, "b", masquerades[0].Domain, "Wrong masquerade at position 0")
+	require.Equal(t, "2", masquerades[0].IpAddress, "Masquerade at position 0 has wrong IpAddress")
+	require.Equal(t, testProviderID, masquerades[0].ProviderID, "Masquerade at position 0 has wrong ProviderID")
+	require.Equal(t, "c", masquerades[1].Domain, "Wrong masquerade at position 0")
+	require.Equal(t, "3", masquerades[1].IpAddress, "Masquerade at position 1 has wrong IpAddress")
+	require.Equal(t, cloudsackID, masquerades[1].ProviderID, "Masquerade at position 1 has wrong ProviderID")
 	d.closeCache()
 
 	time.Sleep(d.maxAllowedCachedAge)
 	d = makeDirect()
 	d.prepopulateMasquerades(cacheFile)
-	assert.Empty(t, readMasquerades(), "Cache should be empty after masquerades expire")
+	require.Empty(t, readCached(), "Cache should be empty after masquerades expire")
 	d.closeCache()
 }
