@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	numberToVetInitially       = 10
+	numberToVetInitially       = 100
 	defaultMaxAllowedCachedAge = 24 * time.Hour
 	defaultMaxCacheSize        = 1000
 	defaultCacheSaveInterval   = 5 * time.Second
