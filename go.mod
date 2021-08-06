@@ -8,7 +8,7 @@ require (
 	github.com/getlantern/golog v0.0.0-20190830074920-4ef2e798c2d7
 	github.com/getlantern/idletiming v0.0.0-20200228204104-10036786eac5
 	github.com/getlantern/keyman v0.0.0-20180207174507-f55e7280e93a
-	github.com/getlantern/netx v0.0.0-20190110220209-9912de6f94fd
+	github.com/getlantern/netx v0.0.0-20210806160745-b824e2cad607
 	github.com/getlantern/tlsdialer/v3 v3.0.0
 	github.com/getlantern/waitforserver v1.0.1
 	github.com/refraction-networking/utls v0.0.0-20200729012536-186025ac7b77
