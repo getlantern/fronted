@@ -7,3 +7,5 @@ To install:
 For docs:
 
 `godoc github.com/getlantern/fronted`
+
+See [ddftool](https://github.com/getlantern/ddftool) for more details on how to generate and tests fronting domains for the supported CDNs.
