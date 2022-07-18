@@ -178,15 +178,15 @@ func TestHostAliasesBasic(t *testing.T) {
 	}{
 		{
 			"http://fff.cloudsack.biz/foo",
-			`Get "http://fff.cloudsack.biz/foo": No alias for host fff.cloudsack.biz`,
+			`Get "http://fff.cloudsack.biz/foo": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
 		},
 		{
 			"http://fff.cloudsack.biz:1234/bar?x=y&z=w",
-			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": No alias for host fff.cloudsack.biz`,
+			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
 		},
 		{
 			"https://www.google.com",
-			`Get "https://www.google.com": No alias for host www.google.com`,
+			`Get "https://www.google.com": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.google.com`,
 		},
 	}
 
@@ -196,7 +196,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	}
 	defer cloudSack.Close()
 
-	masq := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: cloudSackAddr}}
+	masq := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
@@ -294,14 +294,14 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 	defer cloudSack.Close()
 
-	masq1 := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: cloudSackAddr}}
+	masq1 := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias1 := map[string]string{
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
 	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil)
 
-	masq2 := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: sadCloudAddr}}
+	masq2 := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
@@ -361,17 +361,17 @@ func TestHostAliasesMulti(t *testing.T) {
 
 func TestPassthrough(t *testing.T) {
 	headersIn := map[string][]string{
-		"X-Foo-Bar": []string{"Quux", "Baz"},
-		"X-Bar-Foo": []string{"XYZ"},
-		"X-Quux":    []string{""},
+		"X-Foo-Bar": {"Quux", "Baz"},
+		"X-Bar-Foo": {"XYZ"},
+		"X-Quux":    {""},
 	}
 	headersOut := map[string][]string{
-		"X-Foo-Bar":       []string{"Quux", "Baz"},
-		"X-Bar-Foo":       []string{"XYZ"},
-		"X-Quux":          []string{""},
-		"Connection":      []string{"close"},
-		"User-Agent":      []string{"Go-http-client/1.1"},
-		"Accept-Encoding": []string{"gzip"},
+		"X-Foo-Bar":       {"Quux", "Baz"},
+		"X-Bar-Foo":       {"XYZ"},
+		"X-Quux":          {""},
+		"Connection":      {"close"},
+		"User-Agent":      {"Go-http-client/1.1"},
+		"Accept-Encoding": {"gzip"},
 	}
 
 	tests := []struct {
@@ -406,27 +406,27 @@ func TestPassthrough(t *testing.T) {
 	}{
 		{
 			"http://www.notok.cloudsack.biz",
-			`Get "http://www.notok.cloudsack.biz": No alias for host www.notok.cloudsack.biz`,
+			`Get "http://www.notok.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.notok.cloudsack.biz`,
 		},
 		{
 			"http://ok.cloudsack.biz",
-			`Get "http://ok.cloudsack.biz": No alias for host ok.cloudsack.biz`,
+			`Get "http://ok.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for ok.cloudsack.biz`,
 		},
 		{
 			"http://www.abc.cloudsack.biz",
-			`Get "http://www.abc.cloudsack.biz": No alias for host www.abc.cloudsack.biz`,
+			`Get "http://www.abc.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.abc.cloudsack.biz`,
 		},
 		{
 			"http://noabc.cloudsack.biz",
-			`Get "http://noabc.cloudsack.biz": No alias for host noabc.cloudsack.biz`,
+			`Get "http://noabc.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for noabc.cloudsack.biz`,
 		},
 		{
 			"http://cloudsack.biz",
-			`Get "http://cloudsack.biz": No alias for host cloudsack.biz`,
+			`Get "http://cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for cloudsack.biz`,
 		},
 		{
 			"https://www.google.com",
-			`Get "https://www.google.com": No alias for host www.google.com`,
+			`Get "https://www.google.com": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.google.com`,
 		},
 	}
 
@@ -436,7 +436,7 @@ func TestPassthrough(t *testing.T) {
 	}
 	defer cloudSack.Close()
 
-	masq := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: cloudSackAddr}}
+	masq := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{}
 	passthrough := []string{"*.ok.cloudsack.biz", "abc.cloudsack.biz"}
 	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough)
@@ -502,7 +502,7 @@ func TestCustomValidators(t *testing.T) {
 	testURL := "https://abc.forbidden.com/quux"
 
 	setup := func(validator ResponseValidator) {
-		masq := []*Masquerade{&Masquerade{Domain: "example.com", IpAddress: sadCloudAddr}}
+		masq := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
 		}
