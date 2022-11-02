@@ -30,7 +30,7 @@ func TestDirectDomainFronting(t *testing.T) {
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile but a corrupted version
 	corruptMasquerades(cacheFile)
-	doTestDomainFronting(t, cacheFile, numberToVetInitially+1) // we add one because on the very first dial we're using a cached masquerade that's no good, which results in us eventually vetting an addition good masquerade
+	doTestDomainFronting(t, cacheFile, numberToVetInitially)
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {
@@ -73,14 +73,14 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, ok)
 	d := instance.(*direct)
 
-	// Check the number of masquerades at the end, waiting up to 5 seconds until we get the right number
+	// Check the number of masquerades at the end, waiting up to 30 seconds until we get the right number
 	masqueradesAtEnd := 0
 	for i := 0; i < 100; i++ {
 		masqueradesAtEnd = len(d.masquerades)
 		if masqueradesAtEnd == expectedMasqueradesAtEnd {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 	}
 	require.Equal(t, expectedMasqueradesAtEnd, masqueradesAtEnd)
 	return masqueradesAtEnd
