@@ -22,36 +22,45 @@ func (d *direct) initCaching(cacheFile string) int {
 func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
 	var cache []masquerade
 	bytes, err := ioutil.ReadFile(cacheFile)
-	if err == nil {
-		log.Debugf("Attempting to prepopulate masquerades from cache")
-		var masquerades []masquerade
-		err := json.Unmarshal(bytes, &masquerades)
-		if err != nil {
-			log.Errorf("Error prepopulating cached masquerades: %v", err)
-			return cache
-		}
+	if err != nil {
+		// This is not a big deal since we'll just fill the cache later
+		log.Debugf("ignorable error: Unable to read cache file for prepoulation.: %v", err)
+		return nil
+	}
 
-		log.Debugf("Cache contained %d masquerades", len(masquerades))
-		now := time.Now()
-		for _, m := range masquerades {
-			if now.Sub(m.LastVetted) < d.maxAllowedCachedAge {
-				// fill in default for masquerades lacking provider id
-				if m.ProviderID == "" {
-					m.ProviderID = d.defaultProviderID
-				}
-				// Skip entries for providers that are not configured.
-				_, ok := d.providers[m.ProviderID]
-				if !ok {
-					log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
-					continue
-				}
-				select {
-				case d.cached <- m:
-					// submitted
-					cache = append(cache, m)
-				default:
-					// channel full, that's okay
-				}
+	if len(bytes) == 0 {
+		// This can happen if the file is empty or just not there
+		log.Debug("ignorable error: Cache file is empty")
+		return nil
+	}
+
+	log.Debugf("Attempting to prepopulate masquerades from cache file: %v", cacheFile)
+	var masquerades []masquerade
+	if err := json.Unmarshal(bytes, &masquerades); err != nil {
+		log.Errorf("Error prepopulating cached masquerades: %v", err)
+		return cache
+	}
+
+	log.Debugf("Cache contained %d masquerades", len(masquerades))
+	now := time.Now()
+	for _, m := range masquerades {
+		if now.Sub(m.LastVetted) < d.maxAllowedCachedAge {
+			// fill in default for masquerades lacking provider id
+			if m.ProviderID == "" {
+				m.ProviderID = d.defaultProviderID
+			}
+			// Skip entries for providers that are not configured.
+			_, ok := d.providers[m.ProviderID]
+			if !ok {
+				log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
+				continue
+			}
+			select {
+			case d.cached <- m:
+				// submitted
+				cache = append(cache, m)
+			default:
+				// channel full, that's okay
 			}
 		}
 	}

@@ -18,7 +18,7 @@ jobs:
       run: |
           git config --global url."https://${{ secrets.GH_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
     - name: Run unit tests
-      run: go test -coverprofile=profile.cov
+      run: go test -failfast -coverprofile=profile.cov
     - name: Install goveralls
       run: go install github.com/mattn/goveralls@latest
     - name: Send coverage
