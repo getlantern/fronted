@@ -16,9 +16,10 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/getlantern/waitforserver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/getlantern/waitforserver"
 )
 
 func TestDirectDomainFronting(t *testing.T) {
@@ -178,15 +179,15 @@ func TestHostAliasesBasic(t *testing.T) {
 	}{
 		{
 			"http://fff.cloudsack.biz/foo",
-			`Get "http://fff.cloudsack.biz/foo": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
+			`Get "http://fff.cloudsack.biz/foo": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
 		},
 		{
 			"http://fff.cloudsack.biz:1234/bar?x=y&z=w",
-			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
+			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
 		},
 		{
 			"https://www.google.com",
-			`Get "https://www.google.com": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.google.com`,
+			`Get "https://www.google.com": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.google.com`,
 		},
 	}
 
@@ -406,27 +407,27 @@ func TestPassthrough(t *testing.T) {
 	}{
 		{
 			"http://www.notok.cloudsack.biz",
-			`Get "http://www.notok.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.notok.cloudsack.biz`,
+			`Get "http://www.notok.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.notok.cloudsack.biz`,
 		},
 		{
 			"http://ok.cloudsack.biz",
-			`Get "http://ok.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for ok.cloudsack.biz`,
+			`Get "http://ok.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for ok.cloudsack.biz`,
 		},
 		{
 			"http://www.abc.cloudsack.biz",
-			`Get "http://www.abc.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.abc.cloudsack.biz`,
+			`Get "http://www.abc.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.abc.cloudsack.biz`,
 		},
 		{
 			"http://noabc.cloudsack.biz",
-			`Get "http://noabc.cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for noabc.cloudsack.biz`,
+			`Get "http://noabc.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for noabc.cloudsack.biz`,
 		},
 		{
 			"http://cloudsack.biz",
-			`Get "http://cloudsack.biz": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for cloudsack.biz`,
+			`Get "http://cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for cloudsack.biz`,
 		},
 		{
 			"https://www.google.com",
-			`Get "https://www.google.com": No domain fronting mapping. Please add it to provider_map.yaml or equivalent for www.google.com`,
+			`Get "https://www.google.com": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.google.com`,
 		},
 	}
 

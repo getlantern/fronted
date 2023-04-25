@@ -15,11 +15,12 @@ import (
 	"sync"
 	"time"
 
+	tls "github.com/refraction-networking/utls"
+
 	"github.com/getlantern/golog"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
 	"github.com/getlantern/tlsdialer/v3"
-	tls "github.com/refraction-networking/utls"
 )
 
 const (
@@ -251,7 +252,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 			// so it is returned as good.
 			conn.Close()
 			masqueradeGood(true)
-			return nil, nil, fmt.Errorf("No domain fronting mapping. Please add it to provider_map.yaml or equivalent for %s", originHost)
+			return nil, nil, fmt.Errorf("no domain fronting mapping for '%s'. Please add it to provider_map.yaml or equivalent for %s", m.ProviderID, originHost)
 		}
 		log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 
