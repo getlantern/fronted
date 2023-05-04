@@ -258,9 +258,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 
 		reqi, err := cloneRequestWith(req, frontedHost, getBody())
 		if err != nil {
-			log.Errorf("Failed to copy http request?")
-			masqueradeGood(true)
-			continue
+			return nil, nil, log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err)
 		}
 
 		// don't clobber/confuse Connection header on Upgrade requests.
