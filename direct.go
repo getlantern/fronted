@@ -20,6 +20,7 @@ import (
 	"github.com/getlantern/golog"
 	"github.com/getlantern/idletiming"
 	"github.com/getlantern/netx"
+	"github.com/getlantern/ops"
 	"github.com/getlantern/tlsdialer/v3"
 )
 
@@ -97,6 +98,11 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 }
 
 func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
+	op := ops.Begin("vet_masquerade")
+	defer op.End()
+	op.Set("masquerade_domain", m.Domain)
+	op.Set("masquerade_ip", m.IpAddress)
+
 	d := &direct{
 		certPool:            pool,
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
@@ -104,6 +110,7 @@ func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	}
 	conn, _, err := d.doDial(m)
 	if err != nil {
+		op.FailIf(err)
 		return false
 	}
 	defer conn.Close()
@@ -164,6 +171,9 @@ func postCheck(conn net.Conn, testURL string) bool {
 }
 
 func doCheck(client *http.Client, method string, expectedStatus int, u string) bool {
+	op := ops.Begin("check_masquerade")
+	defer op.End()
+
 	isPost := method == http.MethodPost
 	var requestBody io.Reader
 	if isPost {
@@ -175,6 +185,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		op.FailIf(err)
 		log.Debugf("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
 		return false
 	}
@@ -183,7 +194,11 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		resp.Body.Close()
 	}
 	if resp.StatusCode != expectedStatus {
-		log.Debugf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		op.Set("response_status", resp.StatusCode)
+		op.Set("expected_status", expectedStatus)
+		msg := fmt.Sprintf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		op.FailIf(fmt.Errorf(msg))
+		log.Debug(msg)
 		return false
 	}
 	return true
@@ -200,9 +215,14 @@ func (d *direct) RoundTrip(req *http.Request) (*http.Response, error) {
 // fronting providers will return a 403 for some domains.  Also return the
 // underlying net.Conn established.
 func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, error) {
+	op := ops.Begin("fronted_roundtrip")
+	defer op.End()
+
 	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
+	op.Set("is_idempotent", isIdempotent)
 
 	originHost := req.URL.Hostname()
+	op.Set("origin_host", originHost)
 
 	var body []byte
 	var err error
@@ -210,7 +230,9 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 		// store body in-memory to be able to replay it if necessary
 		body, err = ioutil.ReadAll(req.Body)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Unable to read request body: %v", err)
+			err := fmt.Errorf("unable to read request body: %v", err)
+			op.FailIf(err)
+			return nil, nil, err
 		}
 	}
 
@@ -238,6 +260,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 		conn, m, masqueradeGood, err := d.dial()
 		if err != nil {
 			// unable to find good masquerade, fail
+			op.FailIf(err)
 			return nil, nil, err
 		}
 		provider := d.providerFor(m)
@@ -252,13 +275,15 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 			// so it is returned as good.
 			conn.Close()
 			masqueradeGood(true)
-			return nil, nil, fmt.Errorf("no domain fronting mapping for '%s'. Please add it to provider_map.yaml or equivalent for %s", m.ProviderID, originHost)
+			err := fmt.Errorf("no domain fronting mapping for '%s'. Please add it to provider_map.yaml or equivalent for %s", m.ProviderID, originHost)
+			op.FailIf(err)
+			return nil, nil, err
 		}
 		log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 
 		reqi, err := cloneRequestWith(req, frontedHost, getBody())
 		if err != nil {
-			return nil, nil, log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err)
+			return nil, nil, op.FailIf(log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err))
 		}
 
 		// don't clobber/confuse Connection header on Upgrade requests.
@@ -287,7 +312,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 		return resp, conn, nil
 	}
 
-	return nil, nil, errors.New("Could not complete request even with retries")
+	return nil, nil, op.FailIf(errors.New("could not complete request even with retries"))
 }
 
 func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
@@ -351,7 +376,7 @@ func (d *direct) dialWith(vetted chan masquerade, cached chan masquerade, vetNew
 				case m = <-d.candidates:
 					log.Trace("Got unvetted masquerade")
 				default:
-					return nil, nil, nil, false, errors.New("Could not dial any masquerade?")
+					return nil, nil, nil, false, errors.New("could not dial any masquerade?")
 				}
 			}
 		}
@@ -387,7 +412,6 @@ func (d *direct) dialWith(vetted chan masquerade, cached chan masquerade, vetNew
 		}
 		if err == nil {
 			log.Trace("Returning connection")
-
 			return conn, &m, masqueradeGood, true, err
 		} else if retriable {
 			retryLater = append(retryLater, m)
@@ -399,8 +423,14 @@ func (d *direct) dialWith(vetted chan masquerade, cached chan masquerade, vetNew
 }
 
 func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
+	op := ops.Begin("dial_masquerade")
+	defer op.End()
+	op.Set("masquerade_domain", m.Domain)
+	op.Set("masquerade_ip", m.IpAddress)
+
 	conn, err = d.dialServerWith(m)
 	if err != nil {
+		op.FailIf(err)
 		log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
 		// Don't re-add this candidate if it's any certificate error, as that
 		// will just keep failing and will waste connections. We can't access the underlying
@@ -445,7 +475,7 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	conn, err := dialer.Dial("tcp", addr)
 
 	if err != nil && m != nil {
-		err = fmt.Errorf("Unable to dial masquerade %s: %s", m.Domain, err)
+		err = fmt.Errorf("unable to dial masquerade %s: %s", m.Domain, err)
 	}
 	return conn, err
 }

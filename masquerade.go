@@ -80,9 +80,7 @@ func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquer
 	for _, m := range masquerades {
 		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress})
 	}
-	for _, pt := range passthrough {
-		d.PassthroughPatterns = append(d.PassthroughPatterns, pt)
-	}
+	d.PassthroughPatterns = append(d.PassthroughPatterns, passthrough...)
 	return d
 }
 

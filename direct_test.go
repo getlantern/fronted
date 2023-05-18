@@ -128,17 +128,17 @@ func TestLoadCandidates(t *testing.T) {
 func TestHostAliasesBasic(t *testing.T) {
 
 	headersIn := map[string][]string{
-		"X-Foo-Bar": []string{"Quux", "Baz"},
-		"X-Bar-Foo": []string{"XYZ"},
-		"X-Quux":    []string{""},
+		"X-Foo-Bar": {"Quux", "Baz"},
+		"X-Bar-Foo": {"XYZ"},
+		"X-Quux":    {""},
 	}
 	headersOut := map[string][]string{
-		"X-Foo-Bar":       []string{"Quux", "Baz"},
-		"X-Bar-Foo":       []string{"XYZ"},
-		"X-Quux":          []string{""},
-		"Connection":      []string{"close"},
-		"User-Agent":      []string{"Go-http-client/1.1"},
-		"Accept-Encoding": []string{"gzip"},
+		"X-Foo-Bar":       {"Quux", "Baz"},
+		"X-Bar-Foo":       {"XYZ"},
+		"X-Quux":          {""},
+		"Connection":      {"close"},
+		"User-Agent":      {"Go-http-client/1.1"},
+		"Accept-Encoding": {"gzip"},
 	}
 
 	tests := []struct {
@@ -522,7 +522,7 @@ func TestCustomValidators(t *testing.T) {
 	// This error indicates that the validator has discarded all masquerades.
 	// Each test starts with one masquerade, which is vetted during the
 	// call to NewDirect.
-	masqueradesExhausted := fmt.Sprintf(`Get "%v": Could not dial any masquerade?`, testURL)
+	masqueradesExhausted := fmt.Sprintf(`Get "%v": could not dial any masquerade?`, testURL)
 
 	tests := []struct {
 		responseCode  int

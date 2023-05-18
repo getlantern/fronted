@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/getlantern/eventual"
 	tls "github.com/refraction-networking/utls"
+
+	"github.com/getlantern/eventual"
 )
 
 var (
@@ -61,8 +62,8 @@ func (fctx *FrontingContext) Configure(pool *x509.CertPool, providers map[string
 func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string, clientHelloID tls.ClientHelloID) error {
 	log.Tracef("Configuring fronted %s context", fctx.name)
 
-	if providers == nil || len(providers) == 0 {
-		return fmt.Errorf("No fronted providers for %s context.", fctx.name)
+	if len(providers) == 0 {
+		return fmt.Errorf("no fronted providers for %s context", fctx.name)
 	}
 
 	_existing, ok := fctx.instance.Get(0)
@@ -78,7 +79,7 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	}
 
 	if size == 0 {
-		return fmt.Errorf("No masquerades for %s context.", fctx.name)
+		return fmt.Errorf("no masquerades for %s context", fctx.name)
 	}
 
 	d := &direct{
