@@ -101,10 +101,10 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	}
 
 	d.loadCandidates(d.providers)
-	d.vet(numberToVetInitially)
 	if cacheFile != "" {
 		d.initCaching(cacheFile)
 	}
+	go d.vet(numberToVetInitially)
 	fctx.instance.Set(d)
 	return nil
 }

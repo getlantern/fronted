@@ -111,9 +111,9 @@ func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 }
 
 func (d *direct) vet(numberToVet int) {
-	log.Debugf("Vetting %d initial candidates in parallel", numberToVet)
+	log.Debugf("Vetting %d initial candidates in series", numberToVet)
 	for i := 0; i < numberToVet; i++ {
-		go d.vetOne()
+		d.vetOne()
 	}
 }
 
@@ -121,7 +121,13 @@ func (d *direct) vetOne() {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
 	log.Trace("Vetting one")
-	conn, m, masqueradeGood, err := d.dialWith(context.Background(), d.masquerades)
+	unvettedMasquerades := make([]*masquerade, 0, len(d.masquerades))
+	for _, m := range d.masquerades {
+		if m.lastSucceeded().IsZero() {
+			unvettedMasquerades = append(unvettedMasquerades, m)
+		}
+	}
+	conn, m, masqueradeGood, err := d.dialWith(context.Background(), unvettedMasquerades)
 	if err != nil {
 		log.Errorf("unexpected error vetting masquerades: %v", err)
 	}
