@@ -127,9 +127,15 @@ func (d *direct) vetOne() {
 			unvettedMasquerades = append(unvettedMasquerades, m)
 		}
 	}
-	conn, m, masqueradeGood, err := d.dialWith(context.Background(), unvettedMasquerades)
+
+	// Don't take more than 10 seconds to dial a masquerade for vetting
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, m, masqueradeGood, err := d.dialWith(ctx, unvettedMasquerades)
 	if err != nil {
 		log.Errorf("unexpected error vetting masquerades: %v", err)
+		return
 	}
 	defer conn.Close()
 
@@ -330,6 +336,10 @@ func (d *direct) dial(ctx context.Context) (net.Conn, *masquerade, func(bool) bo
 }
 
 func (d *direct) dialWith(ctx context.Context, masquerades sortedMasquerades) (net.Conn, *masquerade, func(bool) bool, error) {
+	// never take more than a minute to dial out
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+
 	for {
 		masqueradesToTry := masquerades.sortedCopy()
 		for _, m := range masqueradesToTry {
