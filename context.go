@@ -28,8 +28,8 @@ func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProvi
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting
-// using the default context. If it can't obtain a working masquerade within
-// the given timeout, it will return nil/false.
+// using the default context. If the default context isn't configured within
+// the given timeout, this method returns nil, false.
 func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
 	return DefaultContext.NewDirect(timeout)
 }
@@ -93,7 +93,6 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		toCache:             make(chan *cacheOp, defaultMaxCacheSize),
 		defaultProviderID:   defaultProviderID,
 		providers:           make(map[string]*Provider),
-		ready:               make(chan struct{}),
 		clientHelloID:       clientHelloID,
 	}
 
@@ -105,35 +104,22 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	d.loadCandidates(d.providers)
 	d.vet(numberToVetInitially)
 	if cacheFile != "" {
-		numberCached := d.initCaching(cacheFile)
-		if numberCached > 0 {
-			d.signalReady()
-		}
+		d.initCaching(cacheFile)
 	}
 	fctx.instance.Set(d)
 	return nil
 }
 
 // NewDirect creates a new http.RoundTripper that does direct domain fronting.
-// If it can't obtain a working masquerade within the given timeout, it will
-// return nil/false.
+// If the context isn't configured within the given timeout, this method
+// returns nil, false.
 func (fctx *FrontingContext) NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
-	start := time.Now()
 	instance, ok := fctx.instance.Get(timeout)
 	if !ok {
 		log.Errorf("No DirectHttpClient available within %v for context %s", timeout, fctx.name)
 		return nil, false
 	}
-	remaining := timeout - time.Since(start)
-
-	// Wait to be signalled that at least one masquerade has been vetted...
-	select {
-	case <-instance.(*direct).ready:
-		return instance.(http.RoundTripper), true
-	case <-time.After(remaining):
-		log.Errorf("No DirectHttpClient available within %v", timeout)
-		return nil, false
-	}
+	return instance.(http.RoundTripper), true
 }
 
 // CloseCache closes any existing cache file in the default contexxt.

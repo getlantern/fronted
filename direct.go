@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	tls "github.com/refraction-networking/utls"
@@ -48,8 +47,6 @@ type direct struct {
 	toCache             chan *cacheOp
 	defaultProviderID   string
 	providers           map[string]*Provider
-	ready               chan struct{}
-	readyOnce           sync.Once
 	clientHelloID       tls.ClientHelloID
 }
 
@@ -76,12 +73,6 @@ func (d *direct) loadCandidates(initial map[string]*Provider) {
 			d.candidates <- masquerade{Masquerade: *c, ProviderID: key}
 		}
 	}
-}
-
-func (d *direct) signalReady() {
-	d.readyOnce.Do(func() {
-		close(d.ready)
-	})
 }
 
 func (d *direct) providerFor(m *masquerade) *Provider {
@@ -156,9 +147,6 @@ func (d *direct) vetOne() bool {
 	}
 
 	log.Trace("Finished vetting one")
-	// signal that at least one
-	// masquerade has been vetted successfully.
-	d.signalReady()
 	return false
 }
 

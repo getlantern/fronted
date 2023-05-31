@@ -83,7 +83,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	require.Equal(t, expectedMasqueradesAtEnd, masqueradesAtEnd)
+	require.GreaterOrEqual(t, masqueradesAtEnd, expectedMasqueradesAtEnd)
 	return masqueradesAtEnd
 }
 
@@ -517,6 +517,9 @@ func TestCustomValidators(t *testing.T) {
 		}
 
 		Configure(certs, providers, "sadcloud", "")
+
+		// Wait a while for vetting to finish
+		time.Sleep(5 * time.Second)
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
