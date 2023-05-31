@@ -6,120 +6,92 @@ import (
 	"time"
 )
 
-type cacheOp struct {
-	m      masquerade
-	remove bool
-	close  bool
+func (d *direct) initCaching(cacheFile string) {
+	d.prepopulateMasquerades(cacheFile)
+	go d.maintainCache(cacheFile)
 }
 
-func (d *direct) initCaching(cacheFile string) int {
-	cache := d.prepopulateMasquerades(cacheFile)
-	prevetted := len(cache)
-	go d.fillCache(cache, cacheFile)
-	return prevetted
-}
-
-func (d *direct) prepopulateMasquerades(cacheFile string) []masquerade {
-	var cache []masquerade
+func (d *direct) prepopulateMasquerades(cacheFile string) {
 	bytes, err := ioutil.ReadFile(cacheFile)
 	if err != nil {
 		// This is not a big deal since we'll just fill the cache later
-		log.Debugf("ignorable error: Unable to read cache file for prepoulation.: %v", err)
-		return nil
+		log.Debugf("ignorable error: Unable to read cache file for prepopulation: %v", err)
+		return
 	}
 
 	if len(bytes) == 0 {
 		// This can happen if the file is empty or just not there
 		log.Debug("ignorable error: Cache file is empty")
-		return nil
+		return
 	}
 
 	log.Debugf("Attempting to prepopulate masquerades from cache file: %v", cacheFile)
-	var masquerades []masquerade
-	if err := json.Unmarshal(bytes, &masquerades); err != nil {
-		log.Errorf("Error prepopulating cached masquerades: %v", err)
-		return cache
+	var cachedMasquerades []*masquerade
+	if err := json.Unmarshal(bytes, &cachedMasquerades); err != nil {
+		log.Errorf("Error reading cached masquerades: %v", err)
+		return
 	}
 
-	log.Debugf("Cache contained %d masquerades", len(masquerades))
+	log.Debugf("Cache contained %d masquerades", len(cachedMasquerades))
 	now := time.Now()
-	for _, m := range masquerades {
-		if now.Sub(m.LastVetted) < d.maxAllowedCachedAge {
-			// fill in default for masquerades lacking provider id
-			if m.ProviderID == "" {
-				m.ProviderID = d.defaultProviderID
-			}
-			// Skip entries for providers that are not configured.
-			_, ok := d.providers[m.ProviderID]
-			if !ok {
-				log.Debugf("Skipping cached entry for unknown/disabled provider %s", m.ProviderID)
-				continue
-			}
-			select {
-			case d.cached <- m:
-				// submitted
-				cache = append(cache, m)
-			default:
-				// channel full, that's okay
+
+	// update last succeeded status of masquerades based on cached values
+	for _, m := range d.masquerades {
+		for _, cm := range cachedMasquerades {
+			sameMasquerade := cm.ProviderID == m.ProviderID && cm.Domain == m.Domain && cm.IpAddress == m.IpAddress
+			cachedValueFresh := now.Sub(m.LastSucceeded) < d.maxAllowedCachedAge
+			if sameMasquerade && cachedValueFresh {
+				m.LastSucceeded = cm.LastSucceeded
 			}
 		}
 	}
-
-	return cache
 }
 
-func (d *direct) fillCache(cache []masquerade, cacheFile string) {
-	saveTicker := time.NewTicker(d.cacheSaveInterval)
-	defer saveTicker.Stop()
-	cacheChanged := false
+func (d *direct) markCacheDirty() {
+	select {
+	case d.cacheDirty <- nil:
+		// okay
+	default:
+		// already dirty
+	}
+}
+
+func (d *direct) maintainCache(cacheFile string) {
 	for {
 		select {
-		case op := <-d.toCache:
-			if op.close {
-				log.Debug("Cache closed, stop filling")
+		case <-d.cacheClosed:
+			return
+		case <-time.After(d.cacheSaveInterval):
+			select {
+			case <-d.cacheClosed:
 				return
+			case <-d.cacheDirty:
+				d.updateCache(cacheFile)
 			}
-			m := op.m
-			if op.remove {
-				newCache := make([]masquerade, len(cache))
-				for _, existing := range cache {
-					if existing.Domain == m.Domain && existing.IpAddress == m.IpAddress {
-						log.Debugf("Removing masquerade for %v (%v)", m.Domain, m.IpAddress)
-					} else {
-						newCache = append(newCache, existing)
-					}
-				}
-				cache = newCache
-			} else {
-				log.Debugf("Caching vetted masquerade for %v (%v)", m.Domain, m.IpAddress)
-				cache = append(cache, m)
-			}
-			cacheChanged = true
-		case <-saveTicker.C:
-			if !cacheChanged {
-				continue
-			}
-			log.Debug("Saving updated masquerade cache")
-			// Truncate cache to max length if necessary
-			if len(cache) > d.maxCacheSize {
-				truncated := make([]masquerade, d.maxCacheSize)
-				copy(truncated, cache[len(cache)-d.maxCacheSize:])
-				cache = truncated
-			}
-			b, err := json.Marshal(cache)
-			if err != nil {
-				log.Errorf("Unable to marshal cache to JSON: %v", err)
-				break
-			}
-			err = ioutil.WriteFile(cacheFile, b, 0644)
-			if err != nil {
-				log.Errorf("Unable to save cache to disk: %v", err)
-			}
-			cacheChanged = false
 		}
+	}
+}
+
+func (d *direct) updateCache(cacheFile string) {
+	log.Debugf("Updating cache at %v", cacheFile)
+	cache := d.masquerades.sortedCopy()
+	sizeToSave := len(cache)
+	if d.maxCacheSize < sizeToSave {
+		sizeToSave = d.maxCacheSize
+	}
+	b, err := json.Marshal(cache[:sizeToSave])
+	if err != nil {
+		log.Errorf("Unable to marshal cache to JSON: %v", err)
+		return
+	}
+	err = ioutil.WriteFile(cacheFile, b, 0644)
+	if err != nil {
+		log.Errorf("Unable to save cache to disk: %v", err)
 	}
 }
 
 func (d *direct) closeCache() {
-	d.toCache <- &cacheOp{close: true}
+	d.closeCacheOnce.Do(func() {
+		close(d.cacheClosed)
+	})
 }

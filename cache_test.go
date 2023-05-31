@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -28,46 +29,38 @@ func TestCaching(t *testing.T) {
 
 	makeDirect := func() *direct {
 		d := &direct{
-			candidates:          make(chan masquerade, 1000),
-			masquerades:         make(chan masquerade, 1000),
-			cached:              make(chan masquerade, 1000),
+			masquerades:         make(sortedMasquerades, 0, 1000),
 			maxAllowedCachedAge: 250 * time.Millisecond,
 			maxCacheSize:        4,
 			cacheSaveInterval:   50 * time.Millisecond,
-			toCache:             make(chan *cacheOp, 1000),
+			cacheDirty:          make(chan interface{}, 1),
+			cacheClosed:         make(chan interface{}),
 			providers:           providers,
 			defaultProviderID:   cloudsackID,
 		}
-		go d.fillCache(make([]masquerade, 0), cacheFile)
+		go d.maintainCache(cacheFile)
 		return d
 	}
 
 	now := time.Now()
-	ma := masquerade{Masquerade{Domain: "a", IpAddress: "1"}, now, testProviderID}
-	mb := masquerade{Masquerade{Domain: "b", IpAddress: "2"}, now, testProviderID}
-	mc := masquerade{Masquerade{Domain: "c", IpAddress: "3"}, now, ""}         // defaulted
-	md := masquerade{Masquerade{Domain: "d", IpAddress: "4"}, now, "sadcloud"} // skipped
+	mb := &masquerade{Masquerade: Masquerade{Domain: "b", IpAddress: "2"}, LastSucceeded: now, ProviderID: testProviderID}
+	mc := &masquerade{Masquerade: Masquerade{Domain: "c", IpAddress: "3"}, LastSucceeded: now, ProviderID: ""}         // defaulted
+	md := &masquerade{Masquerade: Masquerade{Domain: "d", IpAddress: "4"}, LastSucceeded: now, ProviderID: "sadcloud"} // skipped
 
 	d := makeDirect()
-	d.toCache <- &cacheOp{m: ma}
-	d.toCache <- &cacheOp{m: mb}
-	d.toCache <- &cacheOp{m: mc}
-	d.toCache <- &cacheOp{m: md}
-	d.toCache <- &cacheOp{m: ma, remove: true}
+	d.masquerades = append(d.masquerades, mb, mc, md)
 
-	readCached := func() []masquerade {
-		var result []masquerade
-		for {
-			select {
-			case m := <-d.cached:
-				result = append(result, m)
-			default:
-				return result
-			}
-		}
+	readCached := func() []*masquerade {
+		var result []*masquerade
+		b, err := ioutil.ReadFile(cacheFile)
+		require.NoError(t, err, "Unable to read cache file")
+		err = json.Unmarshal(b, &result)
+		require.NoError(t, err, "Unable to unmarshal cache file")
+		return result
 	}
 
-	// Fill the cache
+	// Save the cache
+	d.markCacheDirty()
 	time.Sleep(d.cacheSaveInterval * 2)
 	d.closeCache()
 
@@ -77,18 +70,12 @@ func TestCaching(t *testing.T) {
 	d = makeDirect()
 	d.prepopulateMasquerades(cacheFile)
 	masquerades := readCached()
-	require.Len(t, masquerades, 2, "Wrong number of masquerades read")
-	require.Equal(t, "b", masquerades[0].Domain, "Wrong masquerade at position 0")
-	require.Equal(t, "2", masquerades[0].IpAddress, "Masquerade at position 0 has wrong IpAddress")
-	require.Equal(t, testProviderID, masquerades[0].ProviderID, "Masquerade at position 0 has wrong ProviderID")
-	require.Equal(t, "c", masquerades[1].Domain, "Wrong masquerade at position 0")
-	require.Equal(t, "3", masquerades[1].IpAddress, "Masquerade at position 1 has wrong IpAddress")
-	require.Equal(t, cloudsackID, masquerades[1].ProviderID, "Masquerade at position 1 has wrong ProviderID")
-	d.closeCache()
-
-	time.Sleep(d.maxAllowedCachedAge)
-	d = makeDirect()
-	d.prepopulateMasquerades(cacheFile)
-	require.Empty(t, readCached(), "Cache should be empty after masquerades expire")
+	require.Len(t, masquerades, 3, "Wrong number of masquerades read")
+	for i, expected := range []*masquerade{mb, mc, md} {
+		require.Equal(t, expected.Domain, masquerades[i].Domain, "Wrong masquerade at position %d", i)
+		require.Equal(t, expected.IpAddress, masquerades[i].IpAddress, "Masquerade at position %d has wrong IpAddress", 0)
+		require.Equal(t, expected.ProviderID, masquerades[i].ProviderID, "Masquerade at position %d has wrong ProviderID", 0)
+		require.Equal(t, now.Unix(), masquerades[i].LastSucceeded.Unix(), "Masquerade at position %d has wrong LastSucceeded", 0)
+	}
 	d.closeCache()
 }
