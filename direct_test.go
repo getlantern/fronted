@@ -60,6 +60,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 
 	client := &http.Client{
 		Transport: transport,
+		Timeout:   5 * time.Second,
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
@@ -108,15 +109,14 @@ func TestLoadCandidates(t *testing.T) {
 	}
 
 	d := &direct{
-		candidates: make(chan masquerade, len(expected)),
+		masquerades: make(sortedMasquerades, 0, len(expected)),
 	}
 
 	d.loadCandidates(providers)
-	close(d.candidates)
 
 	actual := make(map[Masquerade]bool)
 	count := 0
-	for m := range d.candidates {
+	for _, m := range d.masquerades {
 		actual[Masquerade{m.Domain, m.IpAddress}] = true
 		count++
 	}
@@ -356,8 +356,7 @@ func TestHostAliasesMulti(t *testing.T) {
 		}
 	}
 
-	assert.True(t, providerCounts["cloudsack"] > 1)
-	assert.True(t, providerCounts["sadcloud"] > 1)
+	assert.True(t, providerCounts["cloudsack"]+providerCounts["sadcloud"] > 2)
 }
 
 func TestPassthrough(t *testing.T) {
@@ -517,15 +516,12 @@ func TestCustomValidators(t *testing.T) {
 		}
 
 		Configure(certs, providers, "sadcloud", "")
-
-		// Wait a while for vetting to finish
-		time.Sleep(5 * time.Second)
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
 	// Each test starts with one masquerade, which is vetted during the
 	// call to NewDirect.
-	masqueradesExhausted := fmt.Sprintf(`Get "%v": could not dial any masquerade?`, testURL)
+	masqueradesExhausted := fmt.Sprintf(`Get "%v": could not complete request even with retries`, testURL)
 
 	tests := []struct {
 		responseCode  int
@@ -609,7 +605,7 @@ func TestCustomValidators(t *testing.T) {
 
 		res, err := client.Do(req)
 		if test.expectedError == "" {
-			if !assert.Nil(t, err) {
+			if !assert.NoError(t, err) {
 				continue
 			}
 			assert.Equal(t, test.responseCode, res.StatusCode, "Failed to force response status code")

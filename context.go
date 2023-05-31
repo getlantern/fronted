@@ -34,9 +34,9 @@ func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
 	return DefaultContext.NewDirect(timeout)
 }
 
-// CloseCache closes any existing cache file in the default context
-func CloseCache() {
-	DefaultContext.CloseCache()
+// Close closes any existing cache file in the default context
+func Close() {
+	DefaultContext.Close()
 }
 
 func NewFrontingContext(name string) *FrontingContext {
@@ -84,13 +84,12 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 
 	d := &direct{
 		certPool:            pool,
-		candidates:          make(chan masquerade, size),
-		masquerades:         make(chan masquerade, size),
-		cached:              make(chan masquerade, size),
+		masquerades:         make(sortedMasquerades, 0, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
-		toCache:             make(chan *cacheOp, defaultMaxCacheSize),
+		cacheDirty:          make(chan interface{}, 1),
+		cacheClosed:         make(chan interface{}),
 		defaultProviderID:   defaultProviderID,
 		providers:           make(map[string]*Provider),
 		clientHelloID:       clientHelloID,
@@ -122,8 +121,8 @@ func (fctx *FrontingContext) NewDirect(timeout time.Duration) (http.RoundTripper
 	return instance.(http.RoundTripper), true
 }
 
-// CloseCache closes any existing cache file in the default contexxt.
-func (fctx *FrontingContext) CloseCache() {
+// Close closes any existing cache file in the default contexxt.
+func (fctx *FrontingContext) Close() {
 	_existing, ok := fctx.instance.Get(0)
 	if ok && _existing != nil {
 		existing := _existing.(*direct)

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,10 +37,29 @@ type Masquerade struct {
 
 type masquerade struct {
 	Masquerade
-	// lastVetted: the most recent time at which this Masquerade was vetted
-	LastVetted time.Time
+	// lastSucceeded: the most recent time at which this Masquerade succeeded
+	LastSucceeded time.Time
 	// id of DirectProvider that this masquerade is provided by
 	ProviderID string
+	mx         sync.RWMutex
+}
+
+func (m *masquerade) lastSucceeded() time.Time {
+	m.mx.RLock()
+	defer m.mx.RUnlock()
+	return m.LastSucceeded
+}
+
+func (m *masquerade) markSucceeded() {
+	m.mx.Lock()
+	defer m.mx.Unlock()
+	m.LastSucceeded = time.Now()
+}
+
+func (m *masquerade) markFailed() {
+	m.mx.Lock()
+	defer m.mx.Unlock()
+	m.LastSucceeded = time.Time{}
 }
 
 // A Direct fronting provider configuration.
@@ -136,4 +157,26 @@ func NewStatusCodeValidator(reject []int) ResponseValidator {
 		}
 		return nil
 	}
+}
+
+// slice of masquerade sorted by last vetted time
+type sortedMasquerades []*masquerade
+
+func (m sortedMasquerades) Len() int      { return len(m) }
+func (m sortedMasquerades) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
+func (m sortedMasquerades) Less(i, j int) bool {
+	if m[i].lastSucceeded().After(m[j].lastSucceeded()) {
+		return true
+	} else if m[j].lastSucceeded().After(m[i].lastSucceeded()) {
+		return false
+	} else {
+		return m[i].IpAddress < m[j].IpAddress
+	}
+}
+
+func (m sortedMasquerades) sortedCopy() sortedMasquerades {
+	c := make(sortedMasquerades, len(m))
+	copy(c, m)
+	sort.Sort(c)
+	return c
 }

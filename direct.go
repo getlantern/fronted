@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	tls "github.com/refraction-networking/utls"
@@ -38,13 +40,13 @@ var (
 // direct is an implementation of http.RoundTripper
 type direct struct {
 	certPool            *x509.CertPool
-	candidates          chan masquerade
-	masquerades         chan masquerade
-	cached              chan masquerade
+	masquerades         sortedMasquerades
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
 	cacheSaveInterval   time.Duration
-	toCache             chan *cacheOp
+	cacheDirty          chan interface{}
+	cacheClosed         chan interface{}
+	closeCacheOnce      sync.Once
 	defaultProviderID   string
 	providers           map[string]*Provider
 	clientHelloID       tls.ClientHelloID
@@ -70,7 +72,7 @@ func (d *direct) loadCandidates(initial map[string]*Provider) {
 
 		for _, c := range sh {
 			log.Trace("Adding candidate")
-			d.candidates <- masquerade{Masquerade: *c, ProviderID: key}
+			d.masquerades = append(d.masquerades, &masquerade{Masquerade: *c, ProviderID: key})
 		}
 	}
 }
@@ -111,43 +113,32 @@ func vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 func (d *direct) vet(numberToVet int) {
 	log.Debugf("Vetting %d initial candidates in parallel", numberToVet)
 	for i := 0; i < numberToVet; i++ {
-		go d.vetOneUntilGood()
+		go d.vetOne()
 	}
 }
 
-func (d *direct) vetOneUntilGood() {
-	for {
-		if !d.vetOne() {
-			return
-		}
-	}
-}
-
-func (d *direct) vetOne() bool {
+func (d *direct) vetOne() {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
 	log.Trace("Vetting one")
-	// don't vet a new masquerade if encountering an error since vetOne will keep looping until we get a successful connection
-	vetNewOnError := false
-	conn, m, masqueradeGood, masqueradesRemain, err := d.dialWith(d.candidates, d.candidates, vetNewOnError)
+	conn, m, masqueradeGood, err := d.dialWith(context.Background(), d.masquerades)
 	if err != nil {
-		return masqueradesRemain
+		log.Errorf("unexpected error vetting masquerades: %v", err)
 	}
 	defer conn.Close()
 
 	provider := d.providerFor(m)
 	if provider == nil {
 		log.Tracef("Skipping masquerade with disabled/unknown provider id '%s'", m.ProviderID)
-		return masqueradesRemain
+		return
 	}
 
 	if !masqueradeGood(postCheck(conn, provider.TestURL)) {
 		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade")
-		return masqueradesRemain
+		return
 	}
 
 	log.Trace("Finished vetting one")
-	return false
 }
 
 // postCheck does a post with invalid data to verify domain-fronting works
@@ -245,7 +236,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 			log.Debugf("Retrying domain-fronted request, pass %d", i)
 		}
 
-		conn, m, masqueradeGood, err := d.dial()
+		conn, m, masqueradeGood, err := d.dial(req.Context())
 		if err != nil {
 			// unable to find good masquerade, fail
 			op.FailIf(err)
@@ -326,86 +317,46 @@ func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser)
 // masquerades. If successful, it returns a connection to the masquerade,
 // the selected masquerade, and a function that the caller can use to
 // tell us whether the masquerade is good or not (i.e. if masquerade was good,
-// keep it, else vet a new one).
-func (d *direct) dial() (net.Conn, *masquerade, func(bool) bool, error) {
-	// if dialing fails, eagerly vet a new masquerade
-	vetNewOnError := true
-	conn, m, masqueradeGood, _, err := d.dialWith(d.masquerades, d.cached, vetNewOnError)
+// keep it).
+func (d *direct) dial(ctx context.Context) (net.Conn, *masquerade, func(bool) bool, error) {
+	conn, m, masqueradeGood, err := d.dialWith(ctx, d.masquerades)
 	return conn, m, masqueradeGood, err
 }
 
-func (d *direct) dialWith(vetted chan masquerade, cached chan masquerade, vetNewOnError bool) (net.Conn, *masquerade, func(bool) bool, bool, error) {
-	retryLater := make([]masquerade, 0)
-	defer func() {
-		for _, m := range retryLater {
-			// when network just recovered from offline, retryLater has more
-			// elements than the capacity of the channel.
-			select {
-			case vetted <- m:
-			default:
-				log.Debug("Dropping masquerade: retry channel full")
-			}
-		}
-	}()
-
+func (d *direct) dialWith(ctx context.Context, masquerades sortedMasquerades) (net.Conn, *masquerade, func(bool) bool, error) {
 	for {
-		// order of preference vetted -> cached -> unvetted
-		var m masquerade
-		select {
-		case m = <-vetted:
-			log.Trace("Got vetted masquerade")
-		default:
+		masqueradesToTry := masquerades.sortedCopy()
+		for _, m := range masqueradesToTry {
+			// check to see if we've timed out
 			select {
-			case m = <-cached:
-				log.Trace("Got cached masquerade")
+			case <-ctx.Done():
+				return nil, nil, nil, errors.New("could not dial any masquerade?")
 			default:
-				log.Trace("No vetted or cached masquerade found, falling back to unvetted candidate")
-				select {
-				case m = <-d.candidates:
-					log.Trace("Got unvetted masquerade")
-				default:
-					return nil, nil, nil, false, errors.New("could not dial any masquerade?")
-				}
-			}
-		}
-
-		log.Tracef("Dialing to %v", m)
-
-		// We do the full TLS connection here because in practice the domains at a given IP
-		// address can change frequently on CDNs, so the certificate may not match what
-		// we expect.
-		conn, retriable, err := d.doDial(&m.Masquerade)
-		masqueradeGood := func(good bool) bool {
-			if good {
-				m.LastVetted = time.Now()
-				// Requeue the working connection to masquerades
-				d.masquerades <- m
-				select {
-				case d.toCache <- &cacheOp{m: m}:
-					// ok
-				default:
-					// cache writing has fallen behind, drop masquerade
-					log.Debug("Dropping masquerade: cache writing is behind")
-				}
-			} else {
-				go func() {
-					d.toCache <- &cacheOp{m: m, remove: true}
-				}()
-				if vetNewOnError {
-					go d.vetOneUntilGood()
-				}
+				// okay
 			}
 
-			return good
-		}
-		if err == nil {
-			log.Trace("Returning connection")
-			return conn, &m, masqueradeGood, true, err
-		} else if retriable {
-			retryLater = append(retryLater, m)
-		} else {
-			log.Debugf("Dropping masquerade: non retryable error: %v", err)
-			masqueradeGood(false)
+			log.Tracef("Dialing to %v", m)
+
+			// We do the full TLS connection here because in practice the domains at a given IP
+			// address can change frequently on CDNs, so the certificate may not match what
+			// we expect.
+			conn, retriable, err := d.doDial(&m.Masquerade)
+			masqueradeGood := func(good bool) bool {
+				if good {
+					m.markSucceeded()
+				} else {
+					m.markFailed()
+				}
+				d.markCacheDirty()
+				return good
+			}
+			if err == nil {
+				log.Trace("Returning connection")
+				return conn, m, masqueradeGood, err
+			} else if !retriable {
+				log.Debugf("Dropping masquerade: non retryable error: %v", err)
+				masqueradeGood(false)
+			}
 		}
 	}
 }
