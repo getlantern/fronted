@@ -336,45 +336,46 @@ func (d *direct) dial(ctx context.Context) (net.Conn, *masquerade, func(bool) bo
 }
 
 func (d *direct) dialWith(ctx context.Context, masquerades sortedMasquerades) (net.Conn, *masquerade, func(bool) bool, error) {
-	// never take more than a minute to dial out
+	// never take more than a minute trying to find a dialer
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
-	for {
-		masqueradesToTry := masquerades.sortedCopy()
-		for _, m := range masqueradesToTry {
-			// check to see if we've timed out
-			select {
-			case <-ctx.Done():
-				return nil, nil, nil, errors.New("could not dial any masquerade?")
-			default:
-				// okay
-			}
+	masqueradesToTry := masquerades.sortedCopy()
+dialLoop:
+	for _, m := range masqueradesToTry {
+		// check to see if we've timed out
+		select {
+		case <-ctx.Done():
+			break dialLoop
+		default:
+			// okay
+		}
 
-			log.Tracef("Dialing to %v", m)
+		log.Tracef("Dialing to %v", m)
 
-			// We do the full TLS connection here because in practice the domains at a given IP
-			// address can change frequently on CDNs, so the certificate may not match what
-			// we expect.
-			conn, retriable, err := d.doDial(&m.Masquerade)
-			masqueradeGood := func(good bool) bool {
-				if good {
-					m.markSucceeded()
-				} else {
-					m.markFailed()
-				}
-				d.markCacheDirty()
-				return good
+		// We do the full TLS connection here because in practice the domains at a given IP
+		// address can change frequently on CDNs, so the certificate may not match what
+		// we expect.
+		conn, retriable, err := d.doDial(&m.Masquerade)
+		masqueradeGood := func(good bool) bool {
+			if good {
+				m.markSucceeded()
+			} else {
+				m.markFailed()
 			}
-			if err == nil {
-				log.Trace("Returning connection")
-				return conn, m, masqueradeGood, err
-			} else if !retriable {
-				log.Debugf("Dropping masquerade: non retryable error: %v", err)
-				masqueradeGood(false)
-			}
+			d.markCacheDirty()
+			return good
+		}
+		if err == nil {
+			log.Trace("Returning connection")
+			return conn, m, masqueradeGood, err
+		} else if !retriable {
+			log.Debugf("Dropping masquerade: non retryable error: %v", err)
+			masqueradeGood(false)
 		}
 	}
+
+	return nil, nil, nil, errors.New("could not dial any masquerade?")
 }
 
 func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
