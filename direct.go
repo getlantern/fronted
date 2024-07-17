@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -181,7 +180,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		return false
 	}
 	if resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 	if resp.StatusCode != expectedStatus {
@@ -219,7 +218,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 	var err error
 	if isIdempotent && req.Body != nil {
 		// store body in-memory to be able to replay it if necessary
-		body, err = ioutil.ReadAll(req.Body)
+		body, err = io.ReadAll(req.Body)
 		if err != nil {
 			err := fmt.Errorf("unable to read request body: %v", err)
 			op.FailIf(err)
@@ -235,7 +234,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 		if !isIdempotent {
 			return req.Body
 		}
-		return ioutil.NopCloser(bytes.NewReader(body))
+		return io.NopCloser(bytes.NewReader(body))
 	}
 
 	tries := 1

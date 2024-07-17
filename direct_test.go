@@ -4,7 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -23,7 +23,7 @@ import (
 )
 
 func TestDirectDomainFronting(t *testing.T) {
-	dir, err := ioutil.TempDir("", "direct_test")
+	dir, err := os.MkdirTemp("", "direct_test")
 	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
@@ -202,7 +202,7 @@ func TestHostAliasesBasic(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil)
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -232,7 +232,7 @@ func TestHostAliasesBasic(t *testing.T) {
 		}
 
 		var result CDNResult
-		data, err := ioutil.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
 		if !assert.NoError(t, err) {
 			continue
 		}
@@ -300,14 +300,14 @@ func TestHostAliasesMulti(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil)
+	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil)
 
 	masq2 := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
 	}
-	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil)
+	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -339,7 +339,7 @@ func TestHostAliasesMulti(t *testing.T) {
 			}
 
 			var result CDNResult
-			data, err := ioutil.ReadAll(resp.Body)
+			data, err := io.ReadAll(resp.Body)
 			if !assert.NoError(t, err) {
 				continue
 			}
@@ -439,7 +439,7 @@ func TestPassthrough(t *testing.T) {
 	masq := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{}
 	passthrough := []string{"*.ok.cloudsack.biz", "abc.cloudsack.biz"}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough)
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -469,7 +469,7 @@ func TestPassthrough(t *testing.T) {
 		}
 
 		var result CDNResult
-		data, err := ioutil.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
 		if !assert.NoError(t, err) {
 			continue
 		}
@@ -506,7 +506,7 @@ func TestCustomValidators(t *testing.T) {
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
 		}
-		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil)
+		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil, nil)
 
 		certs := x509.NewCertPool()
 		certs.AddCert(sadCloud.Certificate())
@@ -674,7 +674,7 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 
 func corruptMasquerades(cacheFile string) {
 	log.Debug("Corrupting masquerades")
-	data, err := ioutil.ReadFile(cacheFile)
+	data, err := os.ReadFile(cacheFile)
 	if err != nil {
 		log.Error(err)
 		return
@@ -699,5 +699,5 @@ func corruptMasquerades(cacheFile string) {
 	if err != nil {
 		return
 	}
-	ioutil.WriteFile(cacheFile, messedUp, 0644)
+	os.WriteFile(cacheFile, messedUp, 0644)
 }

@@ -2,7 +2,6 @@ package fronted
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestCaching(t *testing.T) {
-	dir, err := ioutil.TempDir("", "direct_test")
+	dir, err := os.MkdirTemp("", "direct_test")
 	if !assert.NoError(t, err, "Unable to create temp dir") {
 		return
 	}
@@ -23,8 +22,8 @@ func TestCaching(t *testing.T) {
 	cloudsackID := "cloudsack"
 
 	providers := map[string]*Provider{
-		testProviderID: NewProvider(nil, "", nil, nil, nil),
-		cloudsackID:    NewProvider(nil, "", nil, nil, nil),
+		testProviderID: NewProvider(nil, "", nil, nil, nil, nil),
+		cloudsackID:    NewProvider(nil, "", nil, nil, nil, nil),
 	}
 
 	makeDirect := func() *direct {
@@ -52,7 +51,7 @@ func TestCaching(t *testing.T) {
 
 	readCached := func() []*masquerade {
 		var result []*masquerade
-		b, err := ioutil.ReadFile(cacheFile)
+		b, err := os.ReadFile(cacheFile)
 		require.NoError(t, err, "Unable to read cache file")
 		err = json.Unmarshal(b, &result)
 		require.NoError(t, err, "Unable to unmarshal cache file")
