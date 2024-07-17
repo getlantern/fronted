@@ -1,6 +1,6 @@
 module github.com/getlantern/fronted
 
-go 1.18
+go 1.22.3
 
 require (
 	github.com/getlantern/eventual v1.0.0
