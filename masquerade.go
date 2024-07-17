@@ -79,6 +79,12 @@ type Provider struct {
 	// Url used to vet masquerades for this provider
 	TestURL     string
 	Masquerades []*Masquerade
+
+	// SNIConfig is a map of SNIs with configurations per region.
+	// The key can be a region initial or the default value, used when
+	// the region wants to use arbitrary SNIs but doesn't provide the SNI list.
+	SNIConfig *SNIConfig
+
 	// Optional response validator used to determine whether
 	// fronting succeeded for this provider. If the validator
 	// detects a failure for a given masquerade, it is discarded.
@@ -86,14 +92,20 @@ type Provider struct {
 	Validator ResponseValidator
 }
 
+type SNIConfig struct {
+	UseArbitrarySNIs bool
+	ArbitrarySNIs    []string
+}
+
 // Create a Provider with the given details
-func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string) *Provider {
+func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, sniConfig *SNIConfig) *Provider {
 	d := &Provider{
 		HostAliases:         make(map[string]string),
 		TestURL:             testURL,
 		Masquerades:         make([]*Masquerade, 0, len(masquerades)),
 		Validator:           validator,
 		PassthroughPatterns: make([]string, 0, len(passthrough)),
+		SNIConfig:           sniConfig,
 	}
 	for k, v := range hosts {
 		d.HostAliases[strings.ToLower(k)] = v

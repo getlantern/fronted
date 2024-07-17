@@ -97,7 +97,7 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 
 	// copy providers
 	for k, p := range providers {
-		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns)
+		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig)
 	}
 
 	d.loadCandidates(d.providers)
