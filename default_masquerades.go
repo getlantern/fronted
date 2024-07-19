@@ -393,7 +393,7 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 		IpAddress: "13.224.2.94",
 	},
 	{
-		Domain:    "gbf.game-a.mbga.jp",
+		Domain:    "ambia-onboarding.goaptive.com",
 		IpAddress: "13.224.0.132",
 	},
 	{
@@ -941,7 +941,7 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 		IpAddress: "99.84.3.31",
 	},
 	{
-		Domain:    "customerfi.com",
+		Domain:    "hansarangcare.com",
 		IpAddress: "13.224.0.137",
 	},
 	{
