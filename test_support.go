@@ -9,7 +9,7 @@ import (
 
 var (
 	testProviderID  = "cloudfront"
-	pingTestURL     = "http://d157vud77ygy87.cloudfront.net/ping"
+	pingTestURL     = "https://d157vud77ygy87.cloudfront.net/ping"
 	testHosts       = map[string]string(nil)
 	testMasquerades = DefaultCloudfrontMasquerades
 )

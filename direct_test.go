@@ -35,10 +35,9 @@ func TestDirectDomainFronting(t *testing.T) {
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {
-
-	getURL := "http://config.example.com/proxies.yaml.gz"
+	getURL := "https://config.example.com/global.yaml.gz"
 	getHost := "config.example.com"
-	getFrontedHost := "d2wi0vwulmtn99.cloudfront.net"
+	getFrontedHost := "d24ykmup0867cj.cloudfront.net"
 
 	pingHost := "ping.example.com"
 	pu, err := url.Parse(pingTestURL)
