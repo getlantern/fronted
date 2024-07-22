@@ -441,7 +441,7 @@ func (d *direct) verifyPeerCertificate(domain string, rawCerts [][]byte, _ [][]*
 	}
 	cert, err := x509.ParseCertificate(rawCerts[0])
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse certificate: %v", err)
 	}
 	opts := x509.VerifyOptions{
 		Roots:         d.certPool,
@@ -452,13 +452,13 @@ func (d *direct) verifyPeerCertificate(domain string, rawCerts [][]byte, _ [][]*
 	for i := 1; i < len(rawCerts); i++ {
 		intermediate, err := x509.ParseCertificate(rawCerts[i])
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse intermediate certificate: %v", err)
 		}
 		opts.Intermediates.AddCert(intermediate)
 	}
 	_, err = cert.Verify(opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to verify certificate: %v", err)
 	}
 
 	return nil
