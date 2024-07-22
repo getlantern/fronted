@@ -26,7 +26,7 @@ var DefaultTrustedCAs = []*CA{
 var DefaultCloudfrontMasquerades = []*Masquerade{
 	{
 		Domain:    "www.amazon.ae",
-		IpAddress: "13.224.6.43",
+		IpAddress: "3.164.6.125",
 	},
 	{
 		Domain:    "cloudfront.net",
@@ -393,8 +393,8 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 		IpAddress: "13.224.2.94",
 	},
 	{
-		Domain:    "ambia-onboarding.goaptive.com",
-		IpAddress: "13.224.0.132",
+		Domain:    "www.amazon.com",
+		IpAddress: "23.199.14.80",
 	},
 	{
 		Domain:    "cloudfront.net",
@@ -450,7 +450,7 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 	},
 	{
 		Domain:    "alexa-comms-mobile-service.amazon.com",
-		IpAddress: "13.224.0.182",
+		IpAddress: "108.139.184.238",
 	},
 	{
 		Domain:    "hkcp08.com",
@@ -722,7 +722,7 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 	},
 	{
 		Domain:    "datadoghq.com",
-		IpAddress: "13.249.5.87",
+		IpAddress: "65.8.214.61",
 	},
 	{
 		Domain:    "demandbase.com",
@@ -782,7 +782,7 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 	},
 	{
 		Domain:    "mobile.mercadopago.com",
-		IpAddress: "99.86.1.210",
+		IpAddress: "108.158.166.197",
 	},
 	{
 		Domain:    "www.awsapps.com",
@@ -941,10 +941,6 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 		IpAddress: "99.84.3.31",
 	},
 	{
-		Domain:    "hansarangcare.com",
-		IpAddress: "13.224.0.137",
-	},
-	{
 		Domain:    "www.linebc.jp",
 		IpAddress: "54.182.4.177",
 	},
@@ -998,11 +994,11 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 	},
 	{
 		Domain:    "mercadopago.com",
-		IpAddress: "13.249.6.109",
+		IpAddress: "13.227.126.107",
 	},
 	{
 		Domain:    "www.stg.misumi-ec.com",
-		IpAddress: "99.86.2.175",
+		IpAddress: "52.192.248.133",
 	},
 	{
 		Domain:    "cloudfront.net",
@@ -1014,7 +1010,7 @@ var DefaultCloudfrontMasquerades = []*Masquerade{
 	},
 	{
 		Domain:    "www.amazon.sa",
-		IpAddress: "54.239.130.180",
+		IpAddress: "18.67.145.124",
 	},
 	{
 		Domain:    "workflow-stage.licenses.adobe.com",
