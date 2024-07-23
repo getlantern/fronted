@@ -34,6 +34,35 @@ func TestDirectDomainFronting(t *testing.T) {
 	doTestDomainFronting(t, cacheFile, numberToVetInitially)
 }
 
+func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
+	dir, err := os.MkdirTemp("", "direct_test")
+	require.NoError(t, err, "Unable to create temp dir")
+	defer os.RemoveAll(dir)
+	cacheFile := filepath.Join(dir, "cachefile.3")
+
+	getURL := "https://config.example.com/global.yaml.gz"
+	getHost := "config.example.com"
+	getFrontedHost := "globalconfig.dsa.akamai.getiantem.org"
+
+	hosts := map[string]string{
+		getHost: getFrontedHost,
+	}
+	certs := trustedCACerts(t)
+	p := testAkamaiProvidersWithHosts(hosts, &SNIConfig{
+		UseArbitrarySNIs: true,
+		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
+	})
+	Configure(certs, p, testProviderID, cacheFile)
+
+	transport, ok := NewDirect(0)
+	require.True(t, ok)
+	client := &http.Client{
+		Transport: transport,
+	}
+	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
+	t.Logf("SNIConfig test passed")
+}
+
 func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {
 	getURL := "https://config.example.com/global.yaml.gz"
 	getHost := "config.example.com"

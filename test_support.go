@@ -56,3 +56,8 @@ func testProvidersWithHosts(hosts map[string]string) map[string]*Provider {
 		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil, nil, nil),
 	}
 }
+func testAkamaiProvidersWithHosts(hosts map[string]string, sniConfig *SNIConfig) map[string]*Provider {
+	return map[string]*Provider{
+		testProviderID: NewProvider(hosts, pingTestURL, DefaultAkamaiMasquerades, nil, nil, sniConfig),
+	}
+}

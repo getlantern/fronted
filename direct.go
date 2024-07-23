@@ -410,10 +410,35 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 }
 
 func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
+	op := ops.Begin("dial_server_with")
+	defer op.End()
+
+	op.Set("masquerade_domain", m.Domain)
+	op.Set("masquerade_ip", m.IpAddress)
+
 	tlsConfig := d.frontingTLSConfig(m)
 	dialTimeout := 10 * time.Second
-	sendServerNameExtension := false
 	addr := m.IpAddress
+	var sendServerNameExtension bool
+
+	// looking for provider and using SNI if enabled
+	provider := d.findProviderFromMasquerade(m)
+	if provider != nil && provider.SNIConfig != nil && provider.SNIConfig.UseArbitrarySNIs {
+		sendServerNameExtension = true
+
+		// selecting a random SNI
+		randomSNIIndex := rand.IntN(len(provider.SNIConfig.ArbitrarySNIs))
+		sniDomain := provider.SNIConfig.ArbitrarySNIs[randomSNIIndex]
+
+		op.Set("arbitrary_sni", sniDomain)
+		tlsConfig.ServerName = sniDomain
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			log.Tracef("verifying peer certificate for masquerade domain %s", m.Domain)
+			return verifyPeerCertificate(rawCerts, verifiedChains, d.certPool, m.Domain)
+		}
+
+	}
 
 	_, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -435,30 +460,36 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	return conn, err
 }
 
-func (d *direct) verifyPeerCertificate(domain string, rawCerts [][]byte, _ [][]*x509.Certificate) error {
+func verifyPeerCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, roots *x509.CertPool, domain string) error {
 	if len(rawCerts) == 0 {
-		return errors.New("no certificates provided")
+		return fmt.Errorf("no certificates presented")
 	}
 	cert, err := x509.ParseCertificate(rawCerts[0])
 	if err != nil {
-		return fmt.Errorf("failed to parse certificate: %v", err)
+		return fmt.Errorf("unable to parse certificate: %v", err)
 	}
-	opts := x509.VerifyOptions{
-		Roots:         d.certPool,
+
+	masqueradeOpts := x509.VerifyOptions{
+		Roots:         roots,
 		CurrentTime:   time.Now(),
 		DNSName:       domain,
 		Intermediates: x509.NewCertPool(),
 	}
-	for i := 1; i < len(rawCerts); i++ {
-		intermediate, err := x509.ParseCertificate(rawCerts[i])
-		if err != nil {
-			return fmt.Errorf("failed to parse intermediate certificate: %v", err)
+
+	for i := range rawCerts {
+		if i == 0 {
+			continue
 		}
-		opts.Intermediates.AddCert(intermediate)
+		crt, err := x509.ParseCertificate(rawCerts[i])
+		if err != nil {
+			return fmt.Errorf("unable to parse intermediate certificate: %v", err)
+		}
+		masqueradeOpts.Intermediates.AddCert(crt)
 	}
-	_, err = cert.Verify(opts)
-	if err != nil {
-		return fmt.Errorf("failed to verify certificate: %v", err)
+
+	_, masqueradeErr := cert.Verify(masqueradeOpts)
+	if masqueradeErr != nil {
+		return fmt.Errorf("certificate verification failed for masquerade: %v", masqueradeErr)
 	}
 
 	return nil
@@ -476,19 +507,6 @@ func (d *direct) findProviderFromMasquerade(m *Masquerade) *Provider {
 // frontingTLSConfig builds a tls.Config for dialing the fronting domain. This is to establish the
 // initial TCP connection to the CDN.
 func (d *direct) frontingTLSConfig(m *Masquerade) *tls.Config {
-	provider := d.findProviderFromMasquerade(m)
-	if provider != nil && provider.SNIConfig != nil && provider.SNIConfig.UseArbitrarySNIs {
-		randomSNIIndex := rand.IntN(len(provider.SNIConfig.ArbitrarySNIs))
-		sniDomain := provider.SNIConfig.ArbitrarySNIs[randomSNIIndex]
-		return &tls.Config{
-			InsecureSkipVerify: true,
-			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-				return d.verifyPeerCertificate(m.Domain, rawCerts, verifiedChains)
-			},
-			ServerName: sniDomain,
-			RootCAs:    d.certPool,
-		}
-	}
 	return &tls.Config{
 		ServerName: m.Domain,
 		RootCAs:    d.certPool,
