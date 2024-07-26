@@ -80,9 +80,8 @@ type Provider struct {
 	TestURL     string
 	Masquerades []*Masquerade
 
-	// SNIConfig is a map of SNIs with configurations per region.
-	// The key can be a region initial or the default value, used when
-	// the region wants to use arbitrary SNIs but doesn't provide the SNI list.
+	// SNIConfig has the configuration that sets if we should or not use arbitrary SNIs
+	// and which SNIs to use.
 	SNIConfig *SNIConfig
 
 	// Optional response validator used to determine whether
