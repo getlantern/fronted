@@ -145,7 +145,7 @@ func TestLoadCandidates(t *testing.T) {
 	actual := make(map[Masquerade]bool)
 	count := 0
 	for _, m := range d.masquerades {
-		actual[Masquerade{m.Domain, m.IpAddress}] = true
+		actual[Masquerade{Domain: m.Domain, IpAddress: m.IpAddress}] = true
 		count++
 	}
 

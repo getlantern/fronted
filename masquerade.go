@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"fmt"
+	"hash/crc32"
 	"net"
 	"net/http"
 	"sort"
@@ -33,6 +34,9 @@ type Masquerade struct {
 	// IpAddress: pre-resolved ip address to use instead of Domain (if
 	// available)
 	IpAddress string
+
+	// SNI: the SNI to use for this masquerade
+	SNI string
 }
 
 type masquerade struct {
@@ -109,8 +113,14 @@ func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquer
 	for k, v := range hosts {
 		d.HostAliases[strings.ToLower(k)] = v
 	}
+
 	for _, m := range masquerades {
-		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress})
+		var sni string
+		if d.SNIConfig != nil && d.SNIConfig.UseArbitrarySNIs {
+			crc32Hash := int(crc32.ChecksumIEEE([]byte(m.IpAddress)))
+			sni = d.SNIConfig.ArbitrarySNIs[crc32Hash%len(d.SNIConfig.ArbitrarySNIs)]
+		}
+		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni})
 	}
 	d.PassthroughPatterns = append(d.PassthroughPatterns, passthrough...)
 	return d

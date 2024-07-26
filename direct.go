@@ -421,17 +421,11 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	addr := m.IpAddress
 	var sendServerNameExtension bool
 
-	// looking for provider and using SNI if enabled
-	provider := d.findProviderFromMasquerade(m)
-	if provider != nil && provider.SNIConfig != nil && provider.SNIConfig.UseArbitrarySNIs {
+	if m.SNI != "" {
 		sendServerNameExtension = true
 
-		// selecting a random SNI
-		randomSNIIndex := rand.IntN(len(provider.SNIConfig.ArbitrarySNIs))
-		sniDomain := provider.SNIConfig.ArbitrarySNIs[randomSNIIndex]
-
-		op.Set("arbitrary_sni", sniDomain)
-		tlsConfig.ServerName = sniDomain
+		op.Set("arbitrary_sni", m.SNI)
+		tlsConfig.ServerName = m.SNI
 		tlsConfig.InsecureSkipVerify = true
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			log.Tracef("verifying peer certificate for masquerade domain %s", m.Domain)
