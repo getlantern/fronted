@@ -60,7 +60,6 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		Transport: transport,
 	}
 	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
-	t.Logf("SNIConfig test passed")
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {

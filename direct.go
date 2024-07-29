@@ -427,9 +427,9 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		op.Set("arbitrary_sni", m.SNI)
 		tlsConfig.ServerName = m.SNI
 		tlsConfig.InsecureSkipVerify = true
-		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			log.Tracef("verifying peer certificate for masquerade domain %s", m.Domain)
-			return verifyPeerCertificate(rawCerts, verifiedChains, d.certPool, m.Domain)
+			return verifyPeerCertificate(rawCerts, d.certPool, m.Domain)
 		}
 
 	}
@@ -454,13 +454,13 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	return conn, err
 }
 
-func verifyPeerCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, roots *x509.CertPool, domain string) error {
+func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain string) error {
 	if len(rawCerts) == 0 {
 		return fmt.Errorf("no certificates presented")
 	}
 	cert, err := x509.ParseCertificate(rawCerts[0])
 	if err != nil {
-		return fmt.Errorf("unable to parse certificate: %v", err)
+		return fmt.Errorf("unable to parse certificate: %w", err)
 	}
 
 	masqueradeOpts := x509.VerifyOptions{
@@ -476,14 +476,14 @@ func verifyPeerCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certifica
 		}
 		crt, err := x509.ParseCertificate(rawCerts[i])
 		if err != nil {
-			return fmt.Errorf("unable to parse intermediate certificate: %v", err)
+			return fmt.Errorf("unable to parse intermediate certificate: %w", err)
 		}
 		masqueradeOpts.Intermediates.AddCert(crt)
 	}
 
 	_, masqueradeErr := cert.Verify(masqueradeOpts)
 	if masqueradeErr != nil {
-		return fmt.Errorf("certificate verification failed for masquerade: %v", masqueradeErr)
+		return fmt.Errorf("certificate verification failed for masquerade: %w", masqueradeErr)
 	}
 
 	return nil
