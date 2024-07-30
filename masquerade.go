@@ -117,6 +117,7 @@ func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquer
 	for _, m := range masquerades {
 		var sni string
 		if d.SNIConfig != nil && d.SNIConfig.UseArbitrarySNIs {
+			// Ensure that we use a consistent SNI for a given combination of IP address and SNI set
 			crc32Hash := int(crc32.ChecksumIEEE([]byte(m.IpAddress)))
 			sni = d.SNIConfig.ArbitrarySNIs[crc32Hash%len(d.SNIConfig.ArbitrarySNIs)]
 		}
