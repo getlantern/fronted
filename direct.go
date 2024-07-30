@@ -7,8 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -65,7 +64,7 @@ func (d *direct) loadCandidates(initial map[string]*Provider) {
 		// ('inside-out' Fisher-Yates)
 		sh := make([]*Masquerade, size)
 		for i := 0; i < size; i++ {
-			j := rand.Intn(i + 1) // 0 <= j <= i
+			j := rand.IntN(i + 1) // 0 <= j <= i
 			sh[i] = sh[j]
 			sh[j] = arr[i]
 		}
@@ -181,7 +180,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		return false
 	}
 	if resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 	if resp.StatusCode != expectedStatus {
@@ -219,7 +218,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 	var err error
 	if isIdempotent && req.Body != nil {
 		// store body in-memory to be able to replay it if necessary
-		body, err = ioutil.ReadAll(req.Body)
+		body, err = io.ReadAll(req.Body)
 		if err != nil {
 			err := fmt.Errorf("unable to read request body: %v", err)
 			op.FailIf(err)
@@ -235,7 +234,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 		if !isIdempotent {
 			return req.Body
 		}
-		return ioutil.NopCloser(bytes.NewReader(body))
+		return io.NopCloser(bytes.NewReader(body))
 	}
 
 	tries := 1
@@ -411,10 +410,29 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 }
 
 func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
+	op := ops.Begin("dial_server_with")
+	defer op.End()
+
+	op.Set("masquerade_domain", m.Domain)
+	op.Set("masquerade_ip", m.IpAddress)
+
 	tlsConfig := d.frontingTLSConfig(m)
 	dialTimeout := 10 * time.Second
-	sendServerNameExtension := false
 	addr := m.IpAddress
+	var sendServerNameExtension bool
+
+	if m.SNI != "" {
+		sendServerNameExtension = true
+
+		op.Set("arbitrary_sni", m.SNI)
+		tlsConfig.ServerName = m.SNI
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			log.Tracef("verifying peer certificate for masquerade domain %s", m.Domain)
+			return verifyPeerCertificate(rawCerts, d.certPool, m.Domain)
+		}
+
+	}
 
 	_, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -434,6 +452,50 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		err = fmt.Errorf("unable to dial masquerade %s: %s", m.Domain, err)
 	}
 	return conn, err
+}
+
+func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain string) error {
+	if len(rawCerts) == 0 {
+		return fmt.Errorf("no certificates presented")
+	}
+	cert, err := x509.ParseCertificate(rawCerts[0])
+	if err != nil {
+		return fmt.Errorf("unable to parse certificate: %w", err)
+	}
+
+	masqueradeOpts := x509.VerifyOptions{
+		Roots:         roots,
+		CurrentTime:   time.Now(),
+		DNSName:       domain,
+		Intermediates: x509.NewCertPool(),
+	}
+
+	for i := range rawCerts {
+		if i == 0 {
+			continue
+		}
+		crt, err := x509.ParseCertificate(rawCerts[i])
+		if err != nil {
+			return fmt.Errorf("unable to parse intermediate certificate: %w", err)
+		}
+		masqueradeOpts.Intermediates.AddCert(crt)
+	}
+
+	_, masqueradeErr := cert.Verify(masqueradeOpts)
+	if masqueradeErr != nil {
+		return fmt.Errorf("certificate verification failed for masquerade: %w", masqueradeErr)
+	}
+
+	return nil
+}
+
+func (d *direct) findProviderFromMasquerade(m *Masquerade) *Provider {
+	for _, masquerade := range d.masquerades {
+		if masquerade.Domain == m.Domain && masquerade.IpAddress == m.IpAddress {
+			return d.providers[masquerade.ProviderID]
+		}
+	}
+	return nil
 }
 
 // frontingTLSConfig builds a tls.Config for dialing the fronting domain. This is to establish the

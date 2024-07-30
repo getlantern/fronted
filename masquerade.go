@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"fmt"
+	"hash/crc32"
 	"net"
 	"net/http"
 	"sort"
@@ -33,6 +34,9 @@ type Masquerade struct {
 	// IpAddress: pre-resolved ip address to use instead of Domain (if
 	// available)
 	IpAddress string
+
+	// SNI: the SNI to use for this masquerade
+	SNI string
 }
 
 type masquerade struct {
@@ -79,6 +83,11 @@ type Provider struct {
 	// Url used to vet masquerades for this provider
 	TestURL     string
 	Masquerades []*Masquerade
+
+	// SNIConfig has the configuration that sets if we should or not use arbitrary SNIs
+	// and which SNIs to use.
+	SNIConfig *SNIConfig
+
 	// Optional response validator used to determine whether
 	// fronting succeeded for this provider. If the validator
 	// detects a failure for a given masquerade, it is discarded.
@@ -86,20 +95,33 @@ type Provider struct {
 	Validator ResponseValidator
 }
 
+type SNIConfig struct {
+	UseArbitrarySNIs bool
+	ArbitrarySNIs    []string
+}
+
 // Create a Provider with the given details
-func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string) *Provider {
+func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, sniConfig *SNIConfig) *Provider {
 	d := &Provider{
 		HostAliases:         make(map[string]string),
 		TestURL:             testURL,
 		Masquerades:         make([]*Masquerade, 0, len(masquerades)),
 		Validator:           validator,
 		PassthroughPatterns: make([]string, 0, len(passthrough)),
+		SNIConfig:           sniConfig,
 	}
 	for k, v := range hosts {
 		d.HostAliases[strings.ToLower(k)] = v
 	}
+
 	for _, m := range masquerades {
-		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress})
+		var sni string
+		if d.SNIConfig != nil && d.SNIConfig.UseArbitrarySNIs {
+			// Ensure that we use a consistent SNI for a given combination of IP address and SNI set
+			crc32Hash := int(crc32.ChecksumIEEE([]byte(m.IpAddress)))
+			sni = d.SNIConfig.ArbitrarySNIs[crc32Hash%len(d.SNIConfig.ArbitrarySNIs)]
+		}
+		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni})
 	}
 	d.PassthroughPatterns = append(d.PassthroughPatterns, passthrough...)
 	return d
