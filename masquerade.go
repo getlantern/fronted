@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"net"
@@ -46,6 +47,15 @@ type masquerade struct {
 	// id of DirectProvider that this masquerade is provided by
 	ProviderID string
 	mx         sync.RWMutex
+}
+
+// MarshalJSON marshals masquerade into json
+func (m *masquerade) MarshalJSON() ([]byte, error) {
+	m.mx.RLock()
+	defer m.mx.RUnlock()
+	// Type alias for masquerade so that we don't infinitely recurse when marshaling the struct
+	type alias masquerade
+	return json.Marshal((*alias)(m))
 }
 
 func (m *masquerade) lastSucceeded() time.Time {
