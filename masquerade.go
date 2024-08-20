@@ -1,9 +1,9 @@
 package fronted
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"hash/crc32"
 	"net"
 	"net/http"
 	"sort"
@@ -125,16 +125,27 @@ func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquer
 	}
 
 	for _, m := range masquerades {
-		var sni string
-		if d.SNIConfig != nil && d.SNIConfig.UseArbitrarySNIs {
-			// Ensure that we use a consistent SNI for a given combination of IP address and SNI set
-			crc32Hash := int(crc32.ChecksumIEEE([]byte(m.IpAddress)))
-			sni = d.SNIConfig.ArbitrarySNIs[crc32Hash%len(d.SNIConfig.ArbitrarySNIs)]
-		}
+		sni := generateSNI(d.SNIConfig, m)
 		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni})
 	}
 	d.PassthroughPatterns = append(d.PassthroughPatterns, passthrough...)
 	return d
+}
+
+// generateSNI generates a SNI for the given domain and ip address
+func generateSNI(config *SNIConfig, m *Masquerade) string {
+	if config != nil && m != nil && config.UseArbitrarySNIs && len(config.ArbitrarySNIs) > 0 {
+		// Ensure that we use a consistent SNI for a given combination of IP address and SNI set
+		hash := sha256.New()
+		hash.Write([]byte(m.IpAddress))
+		checksum := int(hash.Sum(nil)[0])
+		// making sure checksum is positive
+		if checksum < 0 {
+			checksum = -checksum
+		}
+		return config.ArbitrarySNIs[checksum%len(config.ArbitrarySNIs)]
+	}
+	return ""
 }
 
 // Lookup the host alias for the given hostname for this provider
