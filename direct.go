@@ -498,15 +498,6 @@ func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain strin
 	return nil
 }
 
-func (d *direct) findProviderFromMasquerade(m *Masquerade) *Provider {
-	for _, masquerade := range d.masquerades {
-		if masquerade.Domain == m.Domain && masquerade.IpAddress == m.IpAddress {
-			return d.providers[masquerade.ProviderID]
-		}
-	}
-	return nil
-}
-
 // frontingTLSConfig builds a tls.Config for dialing the fronting domain. This is to establish the
 // initial TCP connection to the CDN.
 func (d *direct) frontingTLSConfig(m *Masquerade) *tls.Config {
