@@ -492,7 +492,7 @@ func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain strin
 	_, sniErr := cert.Verify(sniOpts)
 	_, masqueradeErr := cert.Verify(masqueradeOpts)
 	if masqueradeErr != nil && sniErr != nil {
-		return fmt.Errorf("certificate verification failed for masquerade: %w", masqueradeErr)
+		return fmt.Errorf("certificate verification failed for masquerade and SNI: [%w],[%w]", masqueradeErr, sniErr)
 	}
 
 	return nil
