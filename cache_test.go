@@ -22,8 +22,8 @@ func TestCaching(t *testing.T) {
 	cloudsackID := "cloudsack"
 
 	providers := map[string]*Provider{
-		testProviderID: NewProvider(nil, "", nil, nil, nil, nil),
-		cloudsackID:    NewProvider(nil, "", nil, nil, nil, nil),
+		testProviderID: NewProvider(nil, "", nil, nil, nil, nil, nil),
+		cloudsackID:    NewProvider(nil, "", nil, nil, nil, nil, nil),
 	}
 
 	makeDirect := func() *direct {
