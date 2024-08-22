@@ -38,6 +38,10 @@ type Masquerade struct {
 
 	// SNI: the SNI to use for this masquerade
 	SNI string
+
+	// VerifyHostname is used for checking if the certificate for a given hostname is valid.
+	// This is used for verifying if the peer certificate for the hostnames that are being fronted are valid.
+	VerifyHostname *string
 }
 
 type masquerade struct {
@@ -103,6 +107,10 @@ type Provider struct {
 	// detects a failure for a given masquerade, it is discarded.
 	// The default validator is used if nil.
 	Validator ResponseValidator
+
+	// VerifyHostname is used for checking if the certificate for a given hostname is valid.
+	// This attribute is only being defined here so it can be sent to the masquerade struct later.
+	VerifyHostname *string
 }
 
 type SNIConfig struct {
@@ -111,7 +119,7 @@ type SNIConfig struct {
 }
 
 // Create a Provider with the given details
-func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, sniConfig *SNIConfig) *Provider {
+func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, sniConfig *SNIConfig, verifyHostname *string) *Provider {
 	d := &Provider{
 		HostAliases:         make(map[string]string),
 		TestURL:             testURL,
@@ -126,7 +134,7 @@ func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquer
 
 	for _, m := range masquerades {
 		sni := generateSNI(d.SNIConfig, m)
-		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni})
+		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni, VerifyHostname: verifyHostname})
 	}
 	d.PassthroughPatterns = append(d.PassthroughPatterns, passthrough...)
 	return d

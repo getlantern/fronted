@@ -47,17 +47,17 @@ func trustedCACerts(t *testing.T) *x509.CertPool {
 
 func testProviders() map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades, nil, nil, nil),
+		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades, nil, nil, nil, nil),
 	}
 }
 
 func testProvidersWithHosts(hosts map[string]string) map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil, nil, nil),
+		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil, nil, nil, nil),
 	}
 }
 func testAkamaiProvidersWithHosts(hosts map[string]string, sniConfig *SNIConfig) map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(hosts, pingTestURL, DefaultAkamaiMasquerades, nil, nil, sniConfig),
+		testProviderID: NewProvider(hosts, pingTestURL, DefaultAkamaiMasquerades, nil, nil, sniConfig, nil),
 	}
 }

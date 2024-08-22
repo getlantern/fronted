@@ -428,8 +428,12 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		tlsConfig.ServerName = m.SNI
 		tlsConfig.InsecureSkipVerify = true
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			log.Tracef("verifying peer certificate for masquerade domain %s", m.Domain)
-			return verifyPeerCertificate(rawCerts, d.certPool, m.Domain)
+			var verifyHostname string
+			if m.VerifyHostname != nil {
+				verifyHostname = *m.VerifyHostname
+				op.Set("verify_hostname", verifyHostname)
+			}
+			return verifyPeerCertificate(rawCerts, d.certPool, verifyHostname)
 		}
 
 	}
@@ -447,9 +451,9 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		ClientHelloID:  d.clientHelloID,
 	}
 	conn, err := dialer.Dial("tcp", addr)
-
 	if err != nil && m != nil {
 		err = fmt.Errorf("unable to dial masquerade %s: %s", m.Domain, err)
+		op.FailIf(err)
 	}
 	return conn, err
 }
@@ -463,13 +467,7 @@ func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain strin
 		return fmt.Errorf("unable to parse certificate: %w", err)
 	}
 
-	masqueradeOpts := x509.VerifyOptions{
-		Roots:         roots,
-		CurrentTime:   time.Now(),
-		DNSName:       domain,
-		Intermediates: x509.NewCertPool(),
-	}
-
+	opts := []x509.VerifyOptions{generateVerifyOptions(roots, domain)}
 	for i := range rawCerts {
 		if i == 0 {
 			continue
@@ -478,24 +476,34 @@ func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain strin
 		if err != nil {
 			return fmt.Errorf("unable to parse intermediate certificate: %w", err)
 		}
-		masqueradeOpts.Intermediates.AddCert(crt)
+
+		for _, opt := range opts {
+			opt.Intermediates.AddCert(crt)
+		}
 	}
 
-	_, masqueradeErr := cert.Verify(masqueradeOpts)
-	if masqueradeErr != nil {
-		return fmt.Errorf("certificate verification failed for masquerade: %w", masqueradeErr)
+	var verificationErrors error
+	for _, opt := range opts {
+		_, err := cert.Verify(opt)
+		if err != nil {
+			verificationErrors = errors.Join(verificationErrors, err)
+		}
+	}
+
+	if verificationErrors != nil {
+		return fmt.Errorf("certificate verification failed: %w", verificationErrors)
 	}
 
 	return nil
 }
 
-func (d *direct) findProviderFromMasquerade(m *Masquerade) *Provider {
-	for _, masquerade := range d.masquerades {
-		if masquerade.Domain == m.Domain && masquerade.IpAddress == m.IpAddress {
-			return d.providers[masquerade.ProviderID]
-		}
+func generateVerifyOptions(roots *x509.CertPool, domain string) x509.VerifyOptions {
+	return x509.VerifyOptions{
+		Roots:         roots,
+		CurrentTime:   time.Now(),
+		DNSName:       domain,
+		Intermediates: x509.NewCertPool(),
 	}
-	return nil
 }
 
 // frontingTLSConfig builds a tls.Config for dialing the fronting domain. This is to establish the

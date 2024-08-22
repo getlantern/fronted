@@ -2,7 +2,7 @@ package fronted
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"time"
 )
 
@@ -12,7 +12,7 @@ func (d *direct) initCaching(cacheFile string) {
 }
 
 func (d *direct) prepopulateMasquerades(cacheFile string) {
-	bytes, err := ioutil.ReadFile(cacheFile)
+	bytes, err := os.ReadFile(cacheFile)
 	if err != nil {
 		// This is not a big deal since we'll just fill the cache later
 		log.Debugf("ignorable error: Unable to read cache file for prepopulation: %v", err)
@@ -84,7 +84,7 @@ func (d *direct) updateCache(cacheFile string) {
 		log.Errorf("Unable to marshal cache to JSON: %v", err)
 		return
 	}
-	err = ioutil.WriteFile(cacheFile, b, 0644)
+	err = os.WriteFile(cacheFile, b, 0644)
 	if err != nil {
 		log.Errorf("Unable to save cache to disk: %v", err)
 	}
