@@ -229,7 +229,7 @@ func TestHostAliasesBasic(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil)
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -327,14 +327,14 @@ func TestHostAliasesMulti(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil)
+	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil, nil)
 
 	masq2 := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
 	}
-	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil)
+	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -466,7 +466,7 @@ func TestPassthrough(t *testing.T) {
 	masq := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{}
 	passthrough := []string{"*.ok.cloudsack.biz", "abc.cloudsack.biz"}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough, nil)
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough, nil, nil)
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -533,7 +533,7 @@ func TestCustomValidators(t *testing.T) {
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
 		}
-		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil, nil)
+		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil, nil, nil)
 
 		certs := x509.NewCertPool()
 		certs.AddCert(sadCloud.Certificate())
