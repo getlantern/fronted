@@ -428,10 +428,10 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		tlsConfig.ServerName = m.SNI
 		tlsConfig.InsecureSkipVerify = true
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			log.Tracef("verifying peer certificate for masquerade domain [%s] and SNI [%s]", m.Domain, m.SNI)
 			var verifyHostname string
 			if m.VerifyHostname != nil {
 				verifyHostname = *m.VerifyHostname
+				op.Set("verify_hostname", verifyHostname)
 			}
 			return verifyPeerCertificate(rawCerts, d.certPool, verifyHostname)
 		}
