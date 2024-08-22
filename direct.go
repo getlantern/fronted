@@ -429,7 +429,11 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 		tlsConfig.InsecureSkipVerify = true
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			log.Tracef("verifying peer certificate for masquerade domain [%s] and SNI [%s]", m.Domain, m.SNI)
-			return verifyPeerCertificate(rawCerts, d.certPool, m.Domain, m.SNI)
+			var verifyHostname string
+			if m.VerifyHostname != nil {
+				verifyHostname = *m.VerifyHostname
+			}
+			return verifyPeerCertificate(rawCerts, d.certPool, verifyHostname)
 		}
 
 	}
@@ -454,7 +458,7 @@ func (d *direct) dialServerWith(m *Masquerade) (net.Conn, error) {
 	return conn, err
 }
 
-func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain string, sni string) error {
+func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain string) error {
 	if len(rawCerts) == 0 {
 		return fmt.Errorf("no certificates presented")
 	}
@@ -463,20 +467,7 @@ func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain strin
 		return fmt.Errorf("unable to parse certificate: %w", err)
 	}
 
-	masqueradeOpts := x509.VerifyOptions{
-		Roots:         roots,
-		CurrentTime:   time.Now(),
-		DNSName:       domain,
-		Intermediates: x509.NewCertPool(),
-	}
-
-	sniOpts := x509.VerifyOptions{
-		Roots:         roots,
-		CurrentTime:   time.Now(),
-		DNSName:       sni,
-		Intermediates: x509.NewCertPool(),
-	}
-
+	opts := []x509.VerifyOptions{generateVerifyOptions(roots, domain)}
 	for i := range rawCerts {
 		if i == 0 {
 			continue
@@ -485,17 +476,34 @@ func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain strin
 		if err != nil {
 			return fmt.Errorf("unable to parse intermediate certificate: %w", err)
 		}
-		masqueradeOpts.Intermediates.AddCert(crt)
-		sniOpts.Intermediates.AddCert(crt)
+
+		for _, opt := range opts {
+			opt.Intermediates.AddCert(crt)
+		}
 	}
 
-	_, sniErr := cert.Verify(sniOpts)
-	_, masqueradeErr := cert.Verify(masqueradeOpts)
-	if masqueradeErr != nil && sniErr != nil {
-		return fmt.Errorf("certificate verification failed for masquerade and SNI: [%w],[%w]", masqueradeErr, sniErr)
+	var verificationErrors error
+	for _, opt := range opts {
+		_, err := cert.Verify(opt)
+		if err != nil {
+			verificationErrors = errors.Join(verificationErrors, err)
+		}
+	}
+
+	if verificationErrors != nil {
+		return fmt.Errorf("certificate verification failed: %w", verificationErrors)
 	}
 
 	return nil
+}
+
+func generateVerifyOptions(roots *x509.CertPool, domain string) x509.VerifyOptions {
+	return x509.VerifyOptions{
+		Roots:         roots,
+		CurrentTime:   time.Now(),
+		DNSName:       domain,
+		Intermediates: x509.NewCertPool(),
+	}
 }
 
 // frontingTLSConfig builds a tls.Config for dialing the fronting domain. This is to establish the
