@@ -60,7 +60,7 @@ func (fctx *FrontingContext) Configure(pool *x509.CertPool, providers map[string
 }
 
 func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string, clientHelloID tls.ClientHelloID) error {
-	log.Tracef("Configuring fronted %s context", fctx.name)
+	log.Debugf("Configuring fronted %s context", fctx.name)
 
 	if len(providers) == 0 {
 		return fmt.Errorf("no fronted providers for %s context", fctx.name)
