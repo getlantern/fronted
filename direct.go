@@ -119,7 +119,7 @@ func (d *direct) vet(numberToVet int) {
 func (d *direct) vetOne() {
 	// We're just testing the ability to connect here, destination site doesn't
 	// really matter
-	log.Trace("Vetting one")
+	log.Debug("Vetting one")
 	unvettedMasquerades := make([]*masquerade, 0, len(d.masquerades))
 	for _, m := range d.masquerades {
 		if m.lastSucceeded().IsZero() {
@@ -140,16 +140,16 @@ func (d *direct) vetOne() {
 
 	provider := d.providerFor(m)
 	if provider == nil {
-		log.Tracef("Skipping masquerade with disabled/unknown provider id '%s'", m.ProviderID)
+		log.Debugf("Skipping masquerade with disabled/unknown provider id '%s'", m.ProviderID)
 		return
 	}
 
 	if !masqueradeGood(postCheck(conn, provider.TestURL)) {
-		log.Tracef("Unsuccessful vetting with POST request, discarding masquerade")
+		log.Debugf("Unsuccessful vetting with POST request, discarding masquerade")
 		return
 	}
 
-	log.Trace("Finished vetting one")
+	log.Debug("Finished vetting one")
 }
 
 // postCheck does a post with invalid data to verify domain-fronting works
@@ -269,7 +269,7 @@ func (d *direct) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, e
 			op.FailIf(err)
 			return nil, nil, err
 		}
-		log.Tracef("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
+		log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.ProviderID)
 
 		reqi, err := cloneRequestWith(req, frontedHost, getBody())
 		if err != nil {
@@ -340,11 +340,13 @@ func (d *direct) dialWith(ctx context.Context, masquerades sortedMasquerades) (n
 	defer cancel()
 
 	masqueradesToTry := masquerades.sortedCopy()
+	totalMasquerades := len(masqueradesToTry)
 dialLoop:
 	for _, m := range masqueradesToTry {
 		// check to see if we've timed out
 		select {
 		case <-ctx.Done():
+			log.Debugf("Timed out dialing to %v with %v total masquerades", m, totalMasquerades)
 			break dialLoop
 		default:
 			// okay
@@ -366,7 +368,7 @@ dialLoop:
 			return good
 		}
 		if err == nil {
-			log.Trace("Returning connection")
+			log.Debug("Returning connection")
 			return conn, m, masqueradeGood, err
 		} else if !retriable {
 			log.Debugf("Dropping masquerade: non retryable error: %v", err)
@@ -374,7 +376,7 @@ dialLoop:
 		}
 	}
 
-	return nil, nil, nil, errors.New("could not dial any masquerade?")
+	return nil, nil, nil, log.Errorf("could not dial any masquerade? tried %v", totalMasquerades)
 }
 
 func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error) {
@@ -386,7 +388,7 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 	conn, err = d.dialServerWith(m)
 	if err != nil {
 		op.FailIf(err)
-		log.Tracef("Could not dial to %v, %v", m.IpAddress, err)
+		log.Debugf("Could not dial to %v, %v", m.IpAddress, err)
 		// Don't re-add this candidate if it's any certificate error, as that
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
@@ -394,7 +396,7 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 			log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
 			retriable = false
 		} else {
-			log.Tracef("Unexpected error dialing, keeping masquerade: %v", err)
+			log.Debugf("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
 		}
 	} else {
@@ -403,7 +405,7 @@ func (d *direct) doDial(m *Masquerade) (conn net.Conn, retriable bool, err error
 
 		log.Debugf("Wrapping connection in idletiming connection: %v", m)
 		conn = idletiming.Conn(conn, idleTimeout, func() {
-			log.Tracef("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
+			log.Debugf("Connection to %v idle for %v, closed", conn.RemoteAddr(), idleTimeout)
 		})
 	}
 	return
