@@ -27,11 +27,11 @@ func TestDirectDomainFronting(t *testing.T) {
 	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
-	doTestDomainFronting(t, cacheFile, numberToVetInitially)
+	doTestDomainFronting(t, cacheFile, 10)
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile but a corrupted version
 	corruptMasquerades(cacheFile)
-	doTestDomainFronting(t, cacheFile, numberToVetInitially)
+	doTestDomainFronting(t, cacheFile, 10)
 }
 
 func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {

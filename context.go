@@ -104,7 +104,7 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	if cacheFile != "" {
 		d.initCaching(cacheFile)
 	}
-	go d.vet(numberToVetInitially)
+	d.findWorkingMasquerades()
 	fctx.instance.Set(d)
 	return nil
 }
