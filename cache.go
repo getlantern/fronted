@@ -38,10 +38,10 @@ func (d *direct) prepopulateMasquerades(cacheFile string) {
 	// update last succeeded status of masquerades based on cached values
 	for _, m := range d.masquerades {
 		for _, cm := range cachedMasquerades {
-			sameMasquerade := cm.ProviderID == m.ProviderID && cm.Domain == m.Domain && cm.IpAddress == m.IpAddress
-			cachedValueFresh := now.Sub(m.LastSucceeded) < d.maxAllowedCachedAge
+			sameMasquerade := cm.ProviderID == m.getProviderID() && cm.Domain == m.getDomain() && cm.IpAddress == m.getIpAddress()
+			cachedValueFresh := now.Sub(m.lastSucceeded()) < d.maxAllowedCachedAge
 			if sameMasquerade && cachedValueFresh {
-				m.LastSucceeded = cm.LastSucceeded
+				m.setLastSucceeded(cm.LastSucceeded)
 			}
 		}
 	}

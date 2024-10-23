@@ -2,14 +2,22 @@ package fronted
 
 import (
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/getlantern/netx"
+	"github.com/getlantern/ops"
+	"github.com/getlantern/tlsdialer/v3"
+	tls "github.com/refraction-networking/utls"
 )
 
 const (
@@ -44,6 +52,29 @@ type Masquerade struct {
 	VerifyHostname *string
 }
 
+// Create a masquerade interface for easier testing.
+type MasqueradeInterface interface {
+	dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error)
+
+	// Accessor for the domain of the masquerade
+	getDomain() string
+
+	//Accessor for the IP address of the masquerade
+	getIpAddress() string
+
+	markSucceeded()
+
+	markFailed()
+
+	lastSucceeded() time.Time
+
+	setLastSucceeded(time.Time)
+
+	postCheck(net.Conn, string) bool
+
+	getProviderID() string
+}
+
 type masquerade struct {
 	Masquerade
 	// lastSucceeded: the most recent time at which this Masquerade succeeded
@@ -51,6 +82,98 @@ type masquerade struct {
 	// id of DirectProvider that this masquerade is provided by
 	ProviderID string
 	mx         sync.RWMutex
+}
+
+func (m *masquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
+	tlsConfig := &tls.Config{
+		ServerName: m.Domain,
+		RootCAs:    rootCAs,
+	}
+	dialTimeout := 10 * time.Second
+	addr := m.IpAddress
+	var sendServerNameExtension bool
+	if m.SNI != "" {
+		sendServerNameExtension = true
+		tlsConfig.ServerName = m.SNI
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			var verifyHostname string
+			if m.VerifyHostname != nil {
+				verifyHostname = *m.VerifyHostname
+			}
+			return verifyPeerCertificate(rawCerts, rootCAs, verifyHostname)
+		}
+	}
+	dialer := &tlsdialer.Dialer{
+		DoDial:         netx.DialTimeout,
+		Timeout:        dialTimeout,
+		SendServerName: sendServerNameExtension,
+		Config:         tlsConfig,
+		ClientHelloID:  clientHelloID,
+	}
+	_, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// If there is no port, we default to 443
+		addr = net.JoinHostPort(addr, "443")
+	}
+	return dialer.Dial("tcp", addr)
+}
+
+// postCheck does a post with invalid data to verify domain-fronting works
+func (m *masquerade) postCheck(conn net.Conn, testURL string) bool {
+	client := &http.Client{
+		Transport: frontedHTTPTransport(conn, true),
+	}
+	return doCheck(client, http.MethodPost, http.StatusAccepted, testURL)
+}
+
+func doCheck(client *http.Client, method string, expectedStatus int, u string) bool {
+	op := ops.Begin("check_masquerade")
+	defer op.End()
+
+	isPost := method == http.MethodPost
+	var requestBody io.Reader
+	if isPost {
+		requestBody = strings.NewReader("a")
+	}
+	req, _ := http.NewRequest(method, u, requestBody)
+	if isPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		op.FailIf(err)
+		log.Debugf("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
+		return false
+	}
+	if resp.Body != nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	if resp.StatusCode != expectedStatus {
+		op.Set("response_status", resp.StatusCode)
+		op.Set("expected_status", expectedStatus)
+		msg := fmt.Sprintf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		op.FailIf(errors.New(msg))
+		log.Debug(msg)
+		return false
+	}
+	return true
+}
+
+// getDomain implements MasqueradeInterface.
+func (m *masquerade) getDomain() string {
+	return m.Domain
+}
+
+// getIpAddress implements MasqueradeInterface.
+func (m *masquerade) getIpAddress() string {
+	return m.IpAddress
+}
+
+// getProviderID implements MasqueradeInterface.
+func (m *masquerade) getProviderID() string {
+	return m.ProviderID
 }
 
 // MarshalJSON marshals masquerade into json
@@ -68,6 +191,12 @@ func (m *masquerade) lastSucceeded() time.Time {
 	return m.LastSucceeded
 }
 
+func (m *masquerade) setLastSucceeded(t time.Time) {
+	m.mx.Lock()
+	defer m.mx.Unlock()
+	m.LastSucceeded = t
+}
+
 func (m *masquerade) markSucceeded() {
 	m.mx.Lock()
 	defer m.mx.Unlock()
@@ -79,6 +208,9 @@ func (m *masquerade) markFailed() {
 	defer m.mx.Unlock()
 	m.LastSucceeded = time.Time{}
 }
+
+// Make sure that the mockMasquerade implements the MasqueradeInterface
+var _ MasqueradeInterface = (*masquerade)(nil)
 
 // A Direct fronting provider configuration.
 type Provider struct {
@@ -211,7 +343,7 @@ func NewStatusCodeValidator(reject []int) ResponseValidator {
 }
 
 // slice of masquerade sorted by last vetted time
-type sortedMasquerades []*masquerade
+type sortedMasquerades []MasqueradeInterface
 
 func (m sortedMasquerades) Len() int      { return len(m) }
 func (m sortedMasquerades) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
@@ -221,7 +353,7 @@ func (m sortedMasquerades) Less(i, j int) bool {
 	} else if m[j].lastSucceeded().After(m[i].lastSucceeded()) {
 		return false
 	} else {
-		return m[i].IpAddress < m[j].IpAddress
+		return m[i].getIpAddress() < m[j].getIpAddress()
 	}
 }
 

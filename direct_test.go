@@ -3,8 +3,10 @@ package fronted
 import (
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -16,10 +18,10 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/getlantern/waitforserver"
+	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	. "github.com/getlantern/waitforserver"
 )
 
 func TestDirectDomainFronting(t *testing.T) {
@@ -144,7 +146,7 @@ func TestLoadCandidates(t *testing.T) {
 	actual := make(map[Masquerade]bool)
 	count := 0
 	for _, m := range d.masquerades {
-		actual[Masquerade{Domain: m.Domain, IpAddress: m.IpAddress}] = true
+		actual[Masquerade{Domain: m.getDomain(), IpAddress: m.getIpAddress()}] = true
 		count++
 	}
 
@@ -804,3 +806,153 @@ func TestVerifyPeerCertificate(t *testing.T) {
 		})
 	}
 }
+
+func TestFindWorkingMasquerades(t *testing.T) {
+	tests := []struct {
+		name                string
+		masquerades         []*mockMasquerade
+		expectedSuccessful  int
+		expectedMasquerades int
+	}{
+		{
+			name: "All successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
+				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+			},
+			expectedSuccessful: 4,
+		},
+		{
+			name: "Some successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain2.com", "2.2.2.2", 0, false),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
+				newMockMasquerade("domain4.com", "4.4.4.4", 0, false),
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+			},
+			expectedSuccessful: 2,
+		},
+		{
+			name: "None successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, false),
+				newMockMasquerade("domain2.com", "2.2.2.2", 0, false),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, false),
+				newMockMasquerade("domain4.com", "4.4.4.4", 0, false),
+			},
+			expectedSuccessful: 0,
+		},
+		{
+			name: "Batch processing",
+			masquerades: func() []*mockMasquerade {
+				var masquerades []*mockMasquerade
+				for i := 0; i < 50; i++ {
+					masquerades = append(masquerades, newMockMasquerade(fmt.Sprintf("domain%d.com", i), fmt.Sprintf("1.1.1.%d", i), 0, i%2 == 0))
+				}
+				return masquerades
+			}(),
+			expectedSuccessful: 10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &direct{}
+			d.providers = make(map[string]*Provider)
+			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
+			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
+			for i, m := range tt.masquerades {
+				d.masquerades[i] = m
+			}
+
+			d.findWorkingMasquerades()
+
+			time.Sleep(1000 * time.Millisecond)
+			var successful int
+			for _, m := range tt.masquerades {
+				// If it has a last succeeded time, it was successful
+				if !m.lastSucceededTime.IsZero() {
+					successful++
+				}
+			}
+
+			assert.GreaterOrEqual(t, successful, tt.expectedSuccessful)
+		})
+	}
+}
+
+// Generate a mock of a MasqueradeInterface with a Dial method that can optionally
+// return an error after a specified number of milliseconds.
+func newMockMasquerade(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockMasquerade {
+	return &mockMasquerade{
+		Domain:      domain,
+		IpAddress:   ipAddress,
+		timeout:     timeout,
+		passesCheck: passesCheck,
+	}
+}
+
+type mockMasquerade struct {
+	Domain            string
+	IpAddress         string
+	timeout           time.Duration
+	passesCheck       bool
+	lastSucceededTime time.Time
+}
+
+// setLastSucceeded implements MasqueradeInterface.
+func (m *mockMasquerade) setLastSucceeded(succeededTime time.Time) {
+	m.lastSucceededTime = succeededTime
+}
+
+// lastSucceeded implements MasqueradeInterface.
+func (m *mockMasquerade) lastSucceeded() time.Time {
+	return m.lastSucceededTime
+}
+
+// postCheck implements MasqueradeInterface.
+func (m *mockMasquerade) postCheck(net.Conn, string) bool {
+	return m.passesCheck
+}
+
+// dial implements MasqueradeInterface.
+func (m *mockMasquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
+	if m.timeout > 0 {
+		time.Sleep(m.timeout)
+		return nil, errors.New("mock dial error")
+	}
+	m.lastSucceededTime = time.Now()
+	return &net.TCPConn{}, nil
+}
+
+// getDomain implements MasqueradeInterface.
+func (m *mockMasquerade) getDomain() string {
+	return m.Domain
+}
+
+// getIpAddress implements MasqueradeInterface.
+func (m *mockMasquerade) getIpAddress() string {
+	return m.IpAddress
+}
+
+// getProviderID implements MasqueradeInterface.
+func (m *mockMasquerade) getProviderID() string {
+	return "testProviderId"
+}
+
+// markFailed implements MasqueradeInterface.
+func (m *mockMasquerade) markFailed() {
+
+}
+
+// markSucceeded implements MasqueradeInterface.
+func (m *mockMasquerade) markSucceeded() {
+}
+
+// Make sure that the mockMasquerade implements the MasqueradeInterface
+var _ MasqueradeInterface = (*mockMasquerade)(nil)
