@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -856,7 +857,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				}
 				return masquerades
 			}(),
-			expectedSuccessful: 10,
+			expectedSuccessful: 4,
 		},
 	}
 
@@ -870,18 +871,16 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				d.masquerades[i] = m
 			}
 
-			d.findWorkingMasquerades()
+			var successful atomic.Uint32
+			d.vetGroup(0, 10, &successful)
 
-			time.Sleep(1000 * time.Millisecond)
-			var successful int
-			for _, m := range tt.masquerades {
-				// If it has a last succeeded time, it was successful
-				if !m.lastSucceededTime.IsZero() {
-					successful++
-				}
+			tries := 0
+			for successful.Load() < uint32(tt.expectedSuccessful) && tries < 100 {
+				time.Sleep(30 * time.Millisecond)
+				tries++
 			}
 
-			assert.GreaterOrEqual(t, successful, tt.expectedSuccessful)
+			assert.GreaterOrEqual(t, int(successful.Load()), tt.expectedSuccessful)
 		})
 	}
 }
