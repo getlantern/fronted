@@ -110,7 +110,8 @@ func (d *direct) findWorkingMasquerades() {
 
 func (d *direct) vetGroup(start, batchSize int, successful *atomic.Uint32) {
 	var wg sync.WaitGroup
-	for j := start; j < start+batchSize && j < len(d.masquerades); j++ {
+	masqueradeSize := len(d.masquerades)
+	for j := start; j < start+batchSize && j < masqueradeSize; j++ {
 		wg.Add(1)
 		go func(m MasqueradeInterface) {
 			defer wg.Done()
