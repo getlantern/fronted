@@ -99,16 +99,22 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	return masq.postCheck(conn, testURL)
 }
 
+// findWorkingMasquerades finds working masquerades by vetting them in batches and in
+// parallel. Speed is of the essence here, as without working masquerades, users will
+// be unable to fetch proxy configurations, particularly in the case of a first time
+// user who does not have proxies cached on disk.
 func (d *direct) findWorkingMasquerades() {
 	// vet masquerades in batches
 	const batchSize int = 25
 	var successful atomic.Uint32
+
+	// We loop through all of them until we have 4 successful ones.
 	for i := 0; i < len(d.masquerades) && successful.Load() < 4; i += batchSize {
-		d.vetGroup(i, batchSize, &successful)
+		d.vetBatch(i, batchSize, &successful)
 	}
 }
 
-func (d *direct) vetGroup(start, batchSize int, successful *atomic.Uint32) {
+func (d *direct) vetBatch(start, batchSize int, successful *atomic.Uint32) {
 	var wg sync.WaitGroup
 	masqueradeSize := len(d.masquerades)
 	for j := start; j < start+batchSize && j < masqueradeSize; j++ {

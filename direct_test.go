@@ -872,7 +872,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			}
 
 			var successful atomic.Uint32
-			d.vetGroup(0, 10, &successful)
+			d.vetBatch(0, 10, &successful)
 
 			tries := 0
 			for successful.Load() < uint32(tt.expectedSuccessful) && tries < 100 {
