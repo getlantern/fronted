@@ -3,6 +3,7 @@ package fronted
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -87,6 +88,16 @@ func (d *direct) updateCache(cacheFile string) {
 	err = os.WriteFile(cacheFile, b, 0644)
 	if err != nil {
 		log.Errorf("Unable to save cache to disk: %v", err)
+		// Log the directory of the cache file and if it exists for debugging purposes
+		parent := filepath.Dir(cacheFile)
+		// check if the parent directory exists
+		if _, err := os.Stat(parent); err == nil {
+			// parent directory exists
+			log.Debugf("Parent directory of cache file exists: %v", parent)
+		} else {
+			// parent directory does not exist
+			log.Debugf("Parent directory of cache file does not exist: %v", parent)
+		}
 	}
 }
 
