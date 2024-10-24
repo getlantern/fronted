@@ -49,7 +49,9 @@ type fronted struct {
 	clientHelloID       tls.ClientHelloID
 }
 
-func newFronted(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID, cacheFile string, clientHelloID tls.ClientHelloID) (*fronted, error) {
+func newFronted(pool *x509.CertPool, providers map[string]*Provider,
+	defaultProviderID, cacheFile string, clientHelloID tls.ClientHelloID,
+	listener func(f *fronted)) (*fronted, error) {
 	size := 0
 	for _, p := range providers {
 		size += len(p.Masquerades)
@@ -81,7 +83,7 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider, defaultProv
 	if cacheFile != "" {
 		f.initCaching(cacheFile)
 	}
-	f.findWorkingMasquerades()
+	f.findWorkingMasquerades(listener)
 
 	return f, nil
 }
@@ -139,18 +141,18 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 // parallel. Speed is of the essence here, as without working masquerades, users will
 // be unable to fetch proxy configurations, particularly in the case of a first time
 // user who does not have proxies cached on disk.
-func (f *fronted) findWorkingMasquerades() {
+func (f *fronted) findWorkingMasquerades(listener func(f *fronted)) {
 	// vet masquerades in batches
 	const batchSize int = 25
 	var successful atomic.Uint32
 
 	// We loop through all of them until we have 4 successful ones.
 	for i := 0; i < len(f.masquerades) && successful.Load() < 4; i += batchSize {
-		f.vetBatch(i, batchSize, &successful)
+		f.vetBatch(i, batchSize, &successful, listener)
 	}
 }
 
-func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32) {
+func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32, listener func(f *fronted)) {
 	log.Debugf("Vetting masquerade batch %d-%d", start, start+batchSize)
 	var wg sync.WaitGroup
 	masqueradeSize := len(f.masquerades)
@@ -160,6 +162,9 @@ func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32) {
 			defer wg.Done()
 			if f.vetMasquerade(m) {
 				successful.Add(1)
+				if listener != nil {
+					go listener(f)
+				}
 			}
 		}(f.masquerades[j])
 	}
