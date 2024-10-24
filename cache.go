@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func (d *direct) initCaching(cacheFile string) {
+func (d *fronted) initCaching(cacheFile string) {
 	d.prepopulateMasquerades(cacheFile)
 	go d.maintainCache(cacheFile)
 }
 
-func (d *direct) prepopulateMasquerades(cacheFile string) {
+func (d *fronted) prepopulateMasquerades(cacheFile string) {
 	bytes, err := os.ReadFile(cacheFile)
 	if err != nil {
 		// This is not a big deal since we'll just fill the cache later
@@ -48,7 +48,7 @@ func (d *direct) prepopulateMasquerades(cacheFile string) {
 	}
 }
 
-func (d *direct) markCacheDirty() {
+func (d *fronted) markCacheDirty() {
 	select {
 	case d.cacheDirty <- nil:
 		// okay
@@ -57,7 +57,7 @@ func (d *direct) markCacheDirty() {
 	}
 }
 
-func (d *direct) maintainCache(cacheFile string) {
+func (d *fronted) maintainCache(cacheFile string) {
 	for {
 		select {
 		case <-d.cacheClosed:
@@ -73,7 +73,7 @@ func (d *direct) maintainCache(cacheFile string) {
 	}
 }
 
-func (d *direct) updateCache(cacheFile string) {
+func (d *fronted) updateCache(cacheFile string) {
 	log.Debugf("Updating cache at %v", cacheFile)
 	cache := d.masquerades.sortedCopy()
 	sizeToSave := len(cache)
@@ -101,7 +101,7 @@ func (d *direct) updateCache(cacheFile string) {
 	}
 }
 
-func (d *direct) closeCache() {
+func (d *fronted) closeCache() {
 	d.closeCacheOnce.Do(func() {
 		close(d.cacheClosed)
 	})

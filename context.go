@@ -27,11 +27,11 @@ func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProvi
 	}
 }
 
-// NewDirect creates a new http.RoundTripper that does direct domain fronting
+// NewFronted creates a new http.RoundTripper that does direct domain fronting
 // using the default context. If the default context isn't configured within
 // the given timeout, this method returns nil, false.
-func NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
-	return DefaultContext.NewDirect(timeout)
+func NewFronted(timeout time.Duration) (http.RoundTripper, bool) {
+	return DefaultContext.NewFronted(timeout)
 }
 
 // Close closes any existing cache file in the default context
@@ -68,51 +68,23 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 
 	_existing, ok := fctx.instance.Get(0)
 	if ok && _existing != nil {
-		existing := _existing.(*direct)
+		existing := _existing.(*fronted)
 		log.Debugf("Closing cache from existing instance for %s context", fctx.name)
 		existing.closeCache()
 	}
 
-	size := 0
-	for _, p := range providers {
-		size += len(p.Masquerades)
+	f, err := newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID)
+	if err != nil {
+		return err
 	}
-
-	if size == 0 {
-		return fmt.Errorf("no masquerades for %s context", fctx.name)
-	}
-
-	d := &direct{
-		certPool:            pool,
-		masquerades:         make(sortedMasquerades, 0, size),
-		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
-		maxCacheSize:        defaultMaxCacheSize,
-		cacheSaveInterval:   defaultCacheSaveInterval,
-		cacheDirty:          make(chan interface{}, 1),
-		cacheClosed:         make(chan interface{}),
-		defaultProviderID:   defaultProviderID,
-		providers:           make(map[string]*Provider),
-		clientHelloID:       clientHelloID,
-	}
-
-	// copy providers
-	for k, p := range providers {
-		d.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
-	}
-
-	d.loadCandidates(d.providers)
-	if cacheFile != "" {
-		d.initCaching(cacheFile)
-	}
-	d.findWorkingMasquerades()
-	fctx.instance.Set(d)
+	fctx.instance.Set(f)
 	return nil
 }
 
-// NewDirect creates a new http.RoundTripper that does direct domain fronting.
+// NewFronted creates a new http.RoundTripper that does direct domain fronting.
 // If the context isn't configured within the given timeout, this method
 // returns nil, false.
-func (fctx *FrontingContext) NewDirect(timeout time.Duration) (http.RoundTripper, bool) {
+func (fctx *FrontingContext) NewFronted(timeout time.Duration) (http.RoundTripper, bool) {
 	instance, ok := fctx.instance.Get(timeout)
 	if !ok {
 		log.Errorf("No DirectHttpClient available within %v for context %s", timeout, fctx.name)
@@ -125,7 +97,7 @@ func (fctx *FrontingContext) NewDirect(timeout time.Duration) (http.RoundTripper
 func (fctx *FrontingContext) Close() {
 	_existing, ok := fctx.instance.Get(0)
 	if ok && _existing != nil {
-		existing := _existing.(*direct)
+		existing := _existing.(*fronted)
 		log.Debugf("Closing cache from existing instance in %s context", fctx.name)
 		existing.closeCache()
 	}

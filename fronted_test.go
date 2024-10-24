@@ -57,7 +57,7 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 	})
 	Configure(certs, p, testProviderID, cacheFile)
 
-	transport, ok := NewDirect(0)
+	transport, ok := NewFronted(0)
 	require.True(t, ok)
 	client := &http.Client{
 		Transport: transport,
@@ -85,7 +85,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	p := testProvidersWithHosts(hosts)
 	Configure(certs, p, testProviderID, cacheFile)
 
-	transport, ok := NewDirect(30 * time.Second)
+	transport, ok := NewFronted(30 * time.Second)
 	require.True(t, ok)
 
 	client := &http.Client{
@@ -94,7 +94,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	transport, ok = NewDirect(0)
+	transport, ok = NewFronted(0)
 	require.True(t, ok)
 	client = &http.Client{
 		Transport: transport,
@@ -103,7 +103,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 
 	instance, ok := DefaultContext.instance.Get(0)
 	require.True(t, ok)
-	d := instance.(*direct)
+	d := instance.(*fronted)
 
 	// Check the number of masquerades at the end, waiting up to 30 seconds until we get the right number
 	masqueradesAtEnd := 0
@@ -138,7 +138,7 @@ func TestLoadCandidates(t *testing.T) {
 		}
 	}
 
-	d := &direct{
+	d := &fronted{
 		masquerades: make(sortedMasquerades, 0, len(expected)),
 	}
 
@@ -238,7 +238,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := NewDirect(10 * time.Second)
+	rt, ok := NewFronted(10 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -349,7 +349,7 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	Configure(certs, providers, "cloudsack", "")
-	rt, ok := NewDirect(10 * time.Second)
+	rt, ok := NewFronted(10 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -475,7 +475,7 @@ func TestPassthrough(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := NewDirect(10 * time.Second)
+	rt, ok := NewFronted(10 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -615,7 +615,7 @@ func TestCustomValidators(t *testing.T) {
 
 	for _, test := range tests {
 		setup(test.validator)
-		direct, ok := NewDirect(1 * time.Second)
+		direct, ok := NewFronted(1 * time.Second)
 		if !assert.True(t, ok) {
 			return
 		}
@@ -863,7 +863,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &direct{}
+			d := &fronted{}
 			d.providers = make(map[string]*Provider)
 			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
 			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
