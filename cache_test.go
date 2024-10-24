@@ -26,8 +26,8 @@ func TestCaching(t *testing.T) {
 		cloudsackID:    NewProvider(nil, "", nil, nil, nil, nil, nil),
 	}
 
-	makeDirect := func() *direct {
-		d := &direct{
+	makeDirect := func() *fronted {
+		d := &fronted{
 			masquerades:         make(sortedMasquerades, 0, 1000),
 			maxAllowedCachedAge: 250 * time.Millisecond,
 			maxCacheSize:        4,
