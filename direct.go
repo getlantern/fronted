@@ -68,7 +68,6 @@ func (d *direct) loadCandidates(initial map[string]*Provider) {
 		}
 
 		for _, c := range sh {
-			log.Trace("Adding candidate")
 			d.masquerades = append(d.masquerades, &masquerade{Masquerade: *c, ProviderID: key})
 		}
 	}
@@ -115,6 +114,7 @@ func (d *direct) findWorkingMasquerades() {
 }
 
 func (d *direct) vetBatch(start, batchSize int, successful *atomic.Uint32) {
+	log.Debugf("Vetting masquerade batch %d-%d", start, start+batchSize)
 	var wg sync.WaitGroup
 	masqueradeSize := len(d.masquerades)
 	for j := start; j < start+batchSize && j < masqueradeSize; j++ {
