@@ -209,7 +209,7 @@ func (m *masquerade) markFailed() {
 	m.LastSucceeded = time.Time{}
 }
 
-// Make sure that the mockMasquerade implements the MasqueradeInterface
+// Make sure that the masquerade struct implements the MasqueradeInterface
 var _ MasqueradeInterface = (*masquerade)(nil)
 
 // A Direct fronting provider configuration.
