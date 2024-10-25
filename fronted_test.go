@@ -236,9 +236,11 @@ func TestHostAliasesBasic(t *testing.T) {
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
-	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := NewFronted(30 * time.Second)
+	testContext := NewFrontingContext("TestHostAliasesBasic")
+	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+
+	rt, ok := testContext.NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
