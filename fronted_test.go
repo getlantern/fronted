@@ -57,7 +57,7 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 	})
 	Configure(certs, p, testProviderID, cacheFile)
 
-	transport, ok := NewFronted(0)
+	transport, ok := NewFronted(30 * time.Second)
 	require.True(t, ok)
 	client := &http.Client{
 		Transport: transport,
@@ -94,7 +94,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	transport, ok = NewFronted(0)
+	transport, ok = NewFronted(30 * time.Second)
 	require.True(t, ok)
 	client = &http.Client{
 		Transport: transport,
@@ -238,7 +238,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := NewFronted(10 * time.Second)
+	rt, ok := NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -349,7 +349,7 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	Configure(certs, providers, "cloudsack", "")
-	rt, ok := NewFronted(10 * time.Second)
+	rt, ok := NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -475,7 +475,7 @@ func TestPassthrough(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := NewFronted(10 * time.Second)
+	rt, ok := NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -615,7 +615,7 @@ func TestCustomValidators(t *testing.T) {
 
 	for _, test := range tests {
 		setup(test.validator)
-		direct, ok := NewFronted(1 * time.Second)
+		direct, ok := NewFronted(30 * time.Second)
 		if !assert.True(t, ok) {
 			return
 		}
