@@ -55,9 +55,10 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		UseArbitrarySNIs: true,
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
-	Configure(certs, p, testProviderID, cacheFile)
+	testContext := NewFrontingContext("TestDirectDomainFrontingWithSNIConfig")
+	testContext.Configure(certs, p, testProviderID, cacheFile)
 
-	transport, ok := NewFronted(30 * time.Second)
+	transport, ok := testContext.NewFronted(30 * time.Second)
 	require.True(t, ok)
 	client := &http.Client{
 		Transport: transport,
@@ -83,9 +84,10 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	Configure(certs, p, testProviderID, cacheFile)
+	testContext := NewFrontingContext("doTestDomainFronting")
+	testContext.Configure(certs, p, testProviderID, cacheFile)
 
-	transport, ok := NewFronted(30 * time.Second)
+	transport, ok := testContext.NewFronted(30 * time.Second)
 	require.True(t, ok)
 
 	client := &http.Client{
@@ -94,14 +96,14 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	transport, ok = NewFronted(30 * time.Second)
+	transport, ok = testContext.NewFronted(30 * time.Second)
 	require.True(t, ok)
 	client = &http.Client{
 		Transport: transport,
 	}
 	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
 
-	instance, ok := DefaultContext.instance.Get(0)
+	instance, ok := testContext.instance.Get(0)
 	require.True(t, ok)
 	d := instance.(*fronted)
 
@@ -350,8 +352,9 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	Configure(certs, providers, "cloudsack", "")
-	rt, ok := NewFronted(30 * time.Second)
+	testContext := NewFrontingContext("TestHostAliasesMulti")
+	testContext.Configure(certs, providers, "cloudsack", "")
+	rt, ok := testContext.NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -475,9 +478,11 @@ func TestPassthrough(t *testing.T) {
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
-	Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := NewFronted(30 * time.Second)
+	testContext := NewFrontingContext("TestPassthrough")
+	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+
+	rt, ok := testContext.NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -532,6 +537,7 @@ func TestCustomValidators(t *testing.T) {
 	sadCloudCodes := []int{http.StatusPaymentRequired, http.StatusTeapot, http.StatusBadGateway}
 	sadCloudValidator := NewStatusCodeValidator(sadCloudCodes)
 	testURL := "https://abc.forbidden.com/quux"
+	testContext := NewFrontingContext("TestCustomValidators")
 
 	setup := func(validator ResponseValidator) {
 		masq := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
@@ -547,7 +553,7 @@ func TestCustomValidators(t *testing.T) {
 			"sadcloud": p,
 		}
 
-		Configure(certs, providers, "sadcloud", "")
+		testContext.Configure(certs, providers, "sadcloud", "")
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
@@ -617,7 +623,7 @@ func TestCustomValidators(t *testing.T) {
 
 	for _, test := range tests {
 		setup(test.validator)
-		direct, ok := NewFronted(30 * time.Second)
+		direct, ok := testContext.NewFronted(30 * time.Second)
 		if !assert.True(t, ok) {
 			return
 		}
