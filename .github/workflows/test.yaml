@@ -1,22 +1,21 @@
 name: Build and Test
 
 on:
-  - push
-  - pull_request
+  push:
+
+    # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
 
 jobs:
 
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version-file: "go.mod"
-    - name: Granting private modules access
-      run: |
-          git config --global url."https://${{ secrets.GH_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
     - name: Run unit tests
       run: go test -failfast -coverprofile=profile.cov
     - name: Install goveralls
