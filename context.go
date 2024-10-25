@@ -73,12 +73,13 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		existing.closeCache()
 	}
 
-	_, err := newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID, func(f *fronted) {
-		fctx.instance.Set(f)
+	f, err := newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID, func(f *fronted) {
+
 	})
 	if err != nil {
 		return err
 	}
+	fctx.instance.Set(f)
 	return nil
 }
 
