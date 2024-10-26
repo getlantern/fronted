@@ -90,6 +90,8 @@ func (fctx *FrontingContext) NewFronted(timeout time.Duration) (http.RoundTrippe
 	if !ok {
 		log.Errorf("No DirectHttpClient available within %v for context %s", timeout, fctx.name)
 		return nil, false
+	} else {
+		log.Debugf("DirectHttpClient available for context %s", fctx.name)
 	}
 	return instance.(http.RoundTripper), true
 }

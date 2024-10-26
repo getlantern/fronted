@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDirectDomainFronting(t *testing.T) {
+func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
 	dir, err := os.MkdirTemp("", "direct_test")
 	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
@@ -107,14 +107,14 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, ok)
 	d := instance.(*fronted)
 
-	// Check the number of masquerades at the end, waiting up to 30 seconds until we get the right number
+	// Check the number of masquerades at the end, waiting until we get the right number
 	masqueradesAtEnd := 0
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		masqueradesAtEnd = len(d.masquerades)
 		if masqueradesAtEnd == expectedMasqueradesAtEnd {
 			break
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(30 * time.Millisecond)
 	}
 	require.GreaterOrEqual(t, masqueradesAtEnd, expectedMasqueradesAtEnd)
 	return masqueradesAtEnd
