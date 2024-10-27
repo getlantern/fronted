@@ -156,7 +156,7 @@ func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32, list
 	log.Debugf("Vetting masquerade batch %d-%d", start, start+batchSize)
 	var wg sync.WaitGroup
 	masqueradeSize := len(f.masquerades)
-	for j := start; j < start+batchSize && j < masqueradeSize; j++ {
+	for i := start; i < start+batchSize && i < masqueradeSize; i++ {
 		wg.Add(1)
 		go func(m MasqueradeInterface) {
 			defer wg.Done()
@@ -166,7 +166,7 @@ func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32, list
 					go listener(f)
 				}
 			}
-		}(f.masquerades[j])
+		}(f.masquerades[i])
 	}
 	wg.Wait()
 }

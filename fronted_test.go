@@ -56,7 +56,7 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
 	testContext := NewFrontingContext("TestDirectDomainFrontingWithSNIConfig")
-	testContext.Configure(certs, p, testProviderID, cacheFile)
+	testContext.Configure(certs, p, "akamai", cacheFile)
 
 	transport, ok := testContext.NewFronted(30 * time.Second)
 	require.True(t, ok)
