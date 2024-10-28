@@ -34,11 +34,11 @@ var DefaultTrustedCAs = []*CA{
 var DefaultAkamaiMasquerades = []*Masquerade{
 	{
 		Domain:    "a248.e.akamai.net",
-		IpAddress: "23.53.122.84",
+		IpAddress: "104.117.247.143",
 	},
 	{
 		Domain:    "a248.e.akamai.net",
-		IpAddress: "2.19.198.29",
+		IpAddress: "23.47.194.73",
 	},
 }
 
