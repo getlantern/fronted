@@ -3,15 +3,16 @@ package fronted
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"time"
 )
 
-func (d *direct) initCaching(cacheFile string) {
+func (d *fronted) initCaching(cacheFile string) {
 	d.prepopulateMasquerades(cacheFile)
 	go d.maintainCache(cacheFile)
 }
 
-func (d *direct) prepopulateMasquerades(cacheFile string) {
+func (d *fronted) prepopulateMasquerades(cacheFile string) {
 	bytes, err := os.ReadFile(cacheFile)
 	if err != nil {
 		// This is not a big deal since we'll just fill the cache later
@@ -38,16 +39,16 @@ func (d *direct) prepopulateMasquerades(cacheFile string) {
 	// update last succeeded status of masquerades based on cached values
 	for _, m := range d.masquerades {
 		for _, cm := range cachedMasquerades {
-			sameMasquerade := cm.ProviderID == m.ProviderID && cm.Domain == m.Domain && cm.IpAddress == m.IpAddress
-			cachedValueFresh := now.Sub(m.LastSucceeded) < d.maxAllowedCachedAge
+			sameMasquerade := cm.ProviderID == m.getProviderID() && cm.Domain == m.getDomain() && cm.IpAddress == m.getIpAddress()
+			cachedValueFresh := now.Sub(m.lastSucceeded()) < d.maxAllowedCachedAge
 			if sameMasquerade && cachedValueFresh {
-				m.LastSucceeded = cm.LastSucceeded
+				m.setLastSucceeded(cm.LastSucceeded)
 			}
 		}
 	}
 }
 
-func (d *direct) markCacheDirty() {
+func (d *fronted) markCacheDirty() {
 	select {
 	case d.cacheDirty <- nil:
 		// okay
@@ -56,7 +57,7 @@ func (d *direct) markCacheDirty() {
 	}
 }
 
-func (d *direct) maintainCache(cacheFile string) {
+func (d *fronted) maintainCache(cacheFile string) {
 	for {
 		select {
 		case <-d.cacheClosed:
@@ -72,7 +73,7 @@ func (d *direct) maintainCache(cacheFile string) {
 	}
 }
 
-func (d *direct) updateCache(cacheFile string) {
+func (d *fronted) updateCache(cacheFile string) {
 	log.Debugf("Updating cache at %v", cacheFile)
 	cache := d.masquerades.sortedCopy()
 	sizeToSave := len(cache)
@@ -87,10 +88,20 @@ func (d *direct) updateCache(cacheFile string) {
 	err = os.WriteFile(cacheFile, b, 0644)
 	if err != nil {
 		log.Errorf("Unable to save cache to disk: %v", err)
+		// Log the directory of the cache file and if it exists for debugging purposes
+		parent := filepath.Dir(cacheFile)
+		// check if the parent directory exists
+		if _, err := os.Stat(parent); err == nil {
+			// parent directory exists
+			log.Debugf("Parent directory of cache file exists: %v", parent)
+		} else {
+			// parent directory does not exist
+			log.Debugf("Parent directory of cache file does not exist: %v", parent)
+		}
 	}
 }
 
-func (d *direct) closeCache() {
+func (d *fronted) closeCache() {
 	d.closeCacheOnce.Do(func() {
 		close(d.cacheClosed)
 	})
