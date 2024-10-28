@@ -537,9 +537,8 @@ func TestCustomValidators(t *testing.T) {
 	sadCloudCodes := []int{http.StatusPaymentRequired, http.StatusTeapot, http.StatusBadGateway}
 	sadCloudValidator := NewStatusCodeValidator(sadCloudCodes)
 	testURL := "https://abc.forbidden.com/quux"
-	testContext := NewFrontingContext("TestCustomValidators")
 
-	setup := func(validator ResponseValidator) {
+	setup := func(ctx *FrontingContext, validator ResponseValidator) {
 		masq := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
@@ -553,7 +552,7 @@ func TestCustomValidators(t *testing.T) {
 			"sadcloud": p,
 		}
 
-		testContext.Configure(certs, providers, "sadcloud", "")
+		ctx.Configure(certs, providers, "sadcloud", "")
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
@@ -634,7 +633,8 @@ func TestCustomValidators(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			setup(test.validator)
+			testContext := NewFrontingContext(test.name)
+			setup(testContext, test.validator)
 			direct, ok := testContext.NewFronted(30 * time.Second)
 			require.True(t, ok)
 			client := &http.Client{
