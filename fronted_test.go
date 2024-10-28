@@ -569,31 +569,31 @@ func TestCustomValidators(t *testing.T) {
 	}{
 		// with the default validator, only 403s are rejected
 		{
-			name:          "it should return masquerades exhausted error when providing nil validator and returning 403",
+			name:          "with default validator, it should reject 403",
 			responseCode:  http.StatusForbidden,
 			validator:     nil,
 			expectedError: masqueradesExhausted,
 		},
 		{
-			name:          "it should return no errors when providing nil validator and receiving a 202",
+			name:          "with default validator, it should accept 202",
 			responseCode:  http.StatusAccepted,
 			validator:     nil,
 			expectedError: "",
 		},
 		{
-			name:          "it should return no errors when providing nil validator and receiving 402",
+			name:          "with default validator, it should accept 402",
 			responseCode:  http.StatusPaymentRequired,
 			validator:     nil,
 			expectedError: "",
 		},
 		{
-			name:          "it should return no errors when providing nil validator and receiving 418",
+			name:          "with default validator, it should accept 418",
 			responseCode:  http.StatusTeapot,
 			validator:     nil,
 			expectedError: "",
 		},
 		{
-			name:          "it should return no errors when providing nil validator and receiving 502",
+			name:          "with default validator, it should accept 502",
 			responseCode:  http.StatusBadGateway,
 			validator:     nil,
 			expectedError: "",
@@ -601,31 +601,31 @@ func TestCustomValidators(t *testing.T) {
 
 		// with the custom validator, 403 is allowed, listed codes are rejected
 		{
-			name:          "it should return no errors when providing validator that accepts 403",
+			name:          "with custom validator, it should accept 403",
 			responseCode:  http.StatusForbidden,
 			validator:     sadCloudValidator,
 			expectedError: "",
 		},
 		{
-			name:          "it should return no errors when providing validator that accepts 202",
+			name:          "with custom validator, it should accept 402",
 			responseCode:  http.StatusAccepted,
 			validator:     sadCloudValidator,
 			expectedError: "",
 		},
 		{
-			name:          "it should return masquerades exhausted when validator receives a 402",
+			name:          "with custom validator, it should reject and return error for 402",
 			responseCode:  http.StatusPaymentRequired,
 			validator:     sadCloudValidator,
 			expectedError: masqueradesExhausted,
 		},
 		{
-			name:          "it should return masquerades exhausted when validator receives a 418",
+			name:          "with custom validator, it should reject and return error for 418",
 			responseCode:  http.StatusTeapot,
 			validator:     sadCloudValidator,
 			expectedError: masqueradesExhausted,
 		},
 		{
-			name:          "it should return masquerades exhausted when validator receives a 502",
+			name:          "with custom validator, it should reject and return error for 502",
 			responseCode:  http.StatusBadGateway,
 			validator:     sadCloudValidator,
 			expectedError: masqueradesExhausted,
