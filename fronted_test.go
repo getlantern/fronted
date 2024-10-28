@@ -562,32 +562,38 @@ func TestCustomValidators(t *testing.T) {
 	masqueradesExhausted := fmt.Sprintf(`Get "%v": could not complete request even with retries`, testURL)
 
 	tests := []struct {
+		name          string
 		responseCode  int
 		validator     ResponseValidator
 		expectedError string
 	}{
 		// with the default validator, only 403s are rejected
 		{
+			name:          "it should return masquerades exhausted error when providing nil validator and returning 403",
 			responseCode:  http.StatusForbidden,
 			validator:     nil,
 			expectedError: masqueradesExhausted,
 		},
 		{
+			name:          "it should return no errors when providing nil validator and receiving a 202",
 			responseCode:  http.StatusAccepted,
 			validator:     nil,
 			expectedError: "",
 		},
 		{
+			name:          "it should return no errors when providing nil validator and receiving 402",
 			responseCode:  http.StatusPaymentRequired,
 			validator:     nil,
 			expectedError: "",
 		},
 		{
+			name:          "it should return no errors when providing nil validator and receiving 418",
 			responseCode:  http.StatusTeapot,
 			validator:     nil,
 			expectedError: "",
 		},
 		{
+			name:          "it should return no errors when providing nil validator and receiving 502",
 			responseCode:  http.StatusBadGateway,
 			validator:     nil,
 			expectedError: "",
@@ -595,26 +601,31 @@ func TestCustomValidators(t *testing.T) {
 
 		// with the custom validator, 403 is allowed, listed codes are rejected
 		{
+			name:          "it should return no errors when providing validator that accepts 403",
 			responseCode:  http.StatusForbidden,
 			validator:     sadCloudValidator,
 			expectedError: "",
 		},
 		{
+			name:          "it should return no errors when providing validator that accepts 202",
 			responseCode:  http.StatusAccepted,
 			validator:     sadCloudValidator,
 			expectedError: "",
 		},
 		{
+			name:          "it should return masquerades exhausted when validator receives a 402",
 			responseCode:  http.StatusPaymentRequired,
 			validator:     sadCloudValidator,
 			expectedError: masqueradesExhausted,
 		},
 		{
+			name:          "it should return masquerades exhausted when validator receives a 418",
 			responseCode:  http.StatusTeapot,
 			validator:     sadCloudValidator,
 			expectedError: masqueradesExhausted,
 		},
 		{
+			name:          "it should return masquerades exhausted when validator receives a 502",
 			responseCode:  http.StatusBadGateway,
 			validator:     sadCloudValidator,
 			expectedError: masqueradesExhausted,
@@ -622,34 +633,30 @@ func TestCustomValidators(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		setup(test.validator)
-		direct, ok := testContext.NewFronted(30 * time.Second)
-		if !assert.True(t, ok) {
-			return
-		}
-		client := &http.Client{
-			Transport: direct,
-		}
-
-		req, err := http.NewRequest(http.MethodGet, testURL, nil)
-		if !assert.NoError(t, err) {
-			return
-		}
-		if test.responseCode != http.StatusAccepted {
-			val := strconv.Itoa(test.responseCode)
-			log.Debugf("requesting forced response code %s", val)
-			req.Header.Set(CDNForceFail, val)
-		}
-
-		res, err := client.Do(req)
-		if test.expectedError == "" {
-			if !assert.NoError(t, err) {
-				continue
+		t.Run(test.name, func(t *testing.T) {
+			setup(test.validator)
+			direct, ok := testContext.NewFronted(30 * time.Second)
+			require.True(t, ok)
+			client := &http.Client{
+				Transport: direct,
 			}
-			assert.Equal(t, test.responseCode, res.StatusCode, "Failed to force response status code")
-		} else {
-			assert.EqualError(t, err, test.expectedError)
-		}
+
+			req, err := http.NewRequest(http.MethodGet, testURL, nil)
+			require.NoError(t, err)
+			if test.responseCode != http.StatusAccepted {
+				val := strconv.Itoa(test.responseCode)
+				log.Debugf("requesting forced response code %s", val)
+				req.Header.Set(CDNForceFail, val)
+			}
+
+			res, err := client.Do(req)
+			if test.expectedError == "" {
+				require.NoError(t, err)
+				assert.Equal(t, test.responseCode, res.StatusCode, "Failed to force response status code")
+			} else {
+				assert.EqualError(t, err, test.expectedError)
+			}
+		})
 	}
 }
 
