@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	tls "github.com/refraction-networking/utls"
@@ -371,10 +372,13 @@ func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, 
 	defer op.End()
 	op.Set("masquerade_domain", m.getDomain())
 	op.Set("masquerade_ip", m.getIpAddress())
+	op.Set("masquerade_provider", m.getProviderID())
 
 	conn, err = m.dial(f.certPool, f.clientHelloID)
 	if err != nil {
-		op.FailIf(err)
+		if !isNetworkUnreachable(err) {
+			op.FailIf(err)
+		}
 		log.Debugf("Could not dial to %v, %v", m.getIpAddress(), err)
 		// Don't re-add this candidate if it's any certificate error, as that
 		// will just keep failing and will waste connections. We can't access the underlying
@@ -386,10 +390,29 @@ func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, 
 			log.Debugf("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
 		}
-	} else {
-		log.Debugf("Got successful connection to: %v", m)
+		return
 	}
+	log.Debugf("Got successful connection to: %+v", m)
 	return
+}
+
+func isNetworkUnreachable(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		if errors.Is(opErr.Err, syscall.ENETUNREACH) || errors.Is(opErr.Err, syscall.EHOSTUNREACH) {
+			return true
+		}
+
+		// Fallback to message-based checking (works for Windows and Unix-like systems)
+		errMsg := opErr.Err.Error()
+		if strings.Contains(errMsg, "network is unreachable") ||
+			strings.Contains(errMsg, "no route to host") ||
+			strings.Contains(errMsg, "unreachable network") ||
+			strings.Contains(errMsg, "unreachable host") {
+			return true
+		}
+	}
+	return false
 }
 
 func verifyPeerCertificate(rawCerts [][]byte, roots *x509.CertPool, domain string) error {
