@@ -399,11 +399,12 @@ func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, 
 func isNetworkUnreachable(err error) bool {
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
+		// The following error verifications look for errors that generally happen at Linux/Unix devices
 		if errors.Is(opErr.Err, syscall.ENETUNREACH) || errors.Is(opErr.Err, syscall.EHOSTUNREACH) {
 			return true
 		}
 
-		// Fallback to message-based checking (works for Windows and Unix-like systems)
+		// The string verification errors use a broader approach with errors from windows and also linux/unix devices
 		errMsg := opErr.Err.Error()
 		if strings.Contains(errMsg, "network is unreachable") ||
 			strings.Contains(errMsg, "no route to host") ||
