@@ -144,7 +144,7 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 // user who does not have proxies cached on disk.
 func (f *fronted) findWorkingMasquerades(listener func(f *fronted)) {
 	// vet masquerades in batches
-	const batchSize int = 25
+	const batchSize int = 40
 	var successful atomic.Uint32
 
 	// We loop through all of them until we have 4 successful ones.
@@ -374,6 +374,10 @@ func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, 
 	op.Set("masquerade_ip", m.getIpAddress())
 	op.Set("masquerade_provider", m.getProviderID())
 
+	// Log the time it takes to dial
+	defer func(start time.Time) {
+		log.Debugf("Dialing to %v took %v", m, time.Since(start))
+	}(time.Now())
 	conn, err = m.dial(f.certPool, f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
