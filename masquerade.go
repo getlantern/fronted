@@ -89,7 +89,7 @@ func (m *masquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloI
 		ServerName: m.Domain,
 		RootCAs:    rootCAs,
 	}
-	dialTimeout := 10 * time.Second
+	dialTimeout := 5 * time.Second
 	addr := m.IpAddress
 	var sendServerNameExtension bool
 	if m.SNI != "" {
