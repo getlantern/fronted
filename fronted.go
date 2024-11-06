@@ -376,7 +376,9 @@ func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, 
 
 	// Log the time it takes to dial
 	defer func(start time.Time) {
-		log.Debugf("Dialing to %v took %v", m, time.Since(start))
+		if conn != nil {
+			log.Debugf("Dialing to %v took %v", m, time.Since(start))
+		}
 	}(time.Now())
 	conn, err = m.dial(f.certPool, f.clientHelloID)
 	if err != nil {
