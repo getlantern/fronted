@@ -175,7 +175,7 @@ func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32, list
 func (f *fronted) vetMasquerade(m MasqueradeInterface) bool {
 	conn, masqueradeGood, err := f.dialMasquerade(m)
 	if err != nil {
-		log.Errorf("unexpected error vetting masquerades: %v", err)
+		log.Debugf("unexpected error vetting masquerades: %v", err)
 		return false
 	}
 	defer func() {
