@@ -367,19 +367,17 @@ func (f *fronted) dialMasquerade(m MasqueradeInterface) (net.Conn, func(bool) bo
 	return conn, masqueradeGood, err
 }
 
-func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, err error) {
+func (f *fronted) doDial(m MasqueradeInterface) (net.Conn, bool, error) {
 	op := ops.Begin("dial_masquerade")
 	defer op.End()
 	op.Set("masquerade_domain", m.getDomain())
 	op.Set("masquerade_ip", m.getIpAddress())
 	op.Set("masquerade_provider", m.getProviderID())
 
-	// Log the time it takes to dial
-	defer func(start time.Time) {
-		if conn != nil {
-			log.Debugf("Dialing to %v took %v", m, time.Since(start))
-		}
-	}(time.Now())
+	var conn net.Conn
+	var err error
+	retriable := false
+	start := time.Now()
 	conn, err = m.dial(f.certPool, f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
@@ -396,10 +394,10 @@ func (f *fronted) doDial(m MasqueradeInterface) (conn net.Conn, retriable bool, 
 			log.Debugf("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
 		}
-		return
+	} else {
+		log.Debugf("Got successful connection to: %+v in %v", m, time.Since(start))
 	}
-	log.Debugf("Got successful connection to: %+v", m)
-	return
+	return conn, retriable, err
 }
 
 func isNetworkUnreachable(err error) bool {
