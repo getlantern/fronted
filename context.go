@@ -86,12 +86,13 @@ func (fctx *FrontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 // If the context isn't configured within the given timeout, this method
 // returns nil, false.
 func (fctx *FrontingContext) NewFronted(timeout time.Duration) (http.RoundTripper, bool) {
+	start := time.Now()
 	instance, ok := fctx.instance.Get(timeout)
 	if !ok {
 		log.Errorf("No DirectHttpClient available within %v for context %s", timeout, fctx.name)
 		return nil, false
 	} else {
-		log.Debugf("DirectHttpClient available for context %s", fctx.name)
+		log.Debugf("DirectHttpClient available for context %s after %v", fctx.name, time.Since(start))
 	}
 	return instance.(http.RoundTripper), true
 }
