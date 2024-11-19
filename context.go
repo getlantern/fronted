@@ -66,7 +66,7 @@ func (fctx *frontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 	}
 
 	if _existing, err := fctx.instance.Get(eventual.DontWait); err != nil {
-		log.Errorf("Error getting existing instance for %s context: %s", fctx.name, err)
+		log.Debugf("No existing instance for %s context: %s", fctx.name, err)
 	} else if _existing != nil {
 		existing := _existing.(*fronted)
 		log.Debugf("Closing cache from existing instance for %s context", fctx.name)
