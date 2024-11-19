@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"crypto/x509"
 	"fmt"
 	"net/http"
@@ -8,7 +9,7 @@ import (
 
 	tls "github.com/refraction-networking/utls"
 
-	"github.com/getlantern/eventual"
+	"github.com/getlantern/eventual/v2"
 )
 
 var defaultContext = newFrontingContext("default")
@@ -64,8 +65,9 @@ func (fctx *frontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		return fmt.Errorf("no fronted providers for %s context", fctx.name)
 	}
 
-	_existing, ok := fctx.instance.Get(0)
-	if ok && _existing != nil {
+	if _existing, err := fctx.instance.Get(eventual.DontWait); err != nil {
+		log.Errorf("Error getting existing instance for %s context: %s", fctx.name, err)
+	} else if _existing != nil {
 		existing := _existing.(*fronted)
 		log.Debugf("Closing cache from existing instance for %s context", fctx.name)
 		existing.closeCache()
@@ -86,8 +88,10 @@ func (fctx *frontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 // returns nil, false.
 func (fctx *frontingContext) NewFronted(timeout time.Duration) (http.RoundTripper, bool) {
 	start := time.Now()
-	instance, ok := fctx.instance.Get(timeout)
-	if !ok {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	instance, err := fctx.instance.Get(ctx)
+	if err != nil {
 		log.Errorf("No DirectHttpClient available within %v for context %s", timeout, fctx.name)
 		return nil, false
 	} else {
@@ -98,8 +102,12 @@ func (fctx *frontingContext) NewFronted(timeout time.Duration) (http.RoundTrippe
 
 // Close closes any existing cache file in the default contexxt.
 func (fctx *frontingContext) Close() {
-	_existing, ok := fctx.instance.Get(0)
-	if ok && _existing != nil {
+	_existing, err := fctx.instance.Get(eventual.DontWait)
+	if err != nil {
+		log.Errorf("Error getting existing instance for %s context: %s", fctx.name, err)
+		return
+	}
+	if _existing != nil {
 		existing := _existing.(*fronted)
 		log.Debugf("Closing cache from existing instance in %s context", fctx.name)
 		existing.closeCache()

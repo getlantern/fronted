@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getlantern/eventual/v2"
 	. "github.com/getlantern/waitforserver"
 	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
@@ -103,8 +104,8 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
 
-	instance, ok := testContext.instance.Get(0)
-	require.True(t, ok)
+	instance, err := testContext.instance.Get(eventual.DontWait)
+	require.NoError(t, err)
 	d := instance.(*fronted)
 
 	// Check the number of masquerades at the end, waiting until we get the right number

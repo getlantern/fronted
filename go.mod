@@ -3,9 +3,8 @@ module github.com/getlantern/fronted
 go 1.22.3
 
 require (
-	github.com/getlantern/eventual v1.0.0
+	github.com/getlantern/eventual/v2 v2.0.2
 	github.com/getlantern/golog v0.0.0-20190830074920-4ef2e798c2d7
-	github.com/getlantern/idletiming v0.0.0-20201229174729-33d04d220c4e
 	github.com/getlantern/keyman v0.0.0-20180207174507-f55e7280e93a
 	github.com/getlantern/netx v0.0.0-20210806160745-b824e2cad607
 	github.com/getlantern/ops v0.0.0-20230424193308-26325dfed3cf
