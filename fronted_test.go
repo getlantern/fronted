@@ -55,7 +55,7 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		UseArbitrarySNIs: true,
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
-	testContext := NewFrontingContext("TestDirectDomainFrontingWithSNIConfig")
+	testContext := newFrontingContext("TestDirectDomainFrontingWithSNIConfig")
 	testContext.Configure(certs, p, "akamai", cacheFile)
 
 	transport, ok := testContext.NewFronted(30 * time.Second)
@@ -84,7 +84,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	testContext := NewFrontingContext("doTestDomainFronting")
+	testContext := newFrontingContext("doTestDomainFronting")
 	testContext.Configure(certs, p, testProviderID, cacheFile)
 
 	transport, ok := testContext.NewFronted(30 * time.Second)
@@ -239,7 +239,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	testContext := NewFrontingContext("TestHostAliasesBasic")
+	testContext := newFrontingContext("TestHostAliasesBasic")
 	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
 	rt, ok := testContext.NewFronted(30 * time.Second)
@@ -352,7 +352,7 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	testContext := NewFrontingContext("TestHostAliasesMulti")
+	testContext := newFrontingContext("TestHostAliasesMulti")
 	testContext.Configure(certs, providers, "cloudsack", "")
 	rt, ok := testContext.NewFronted(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
@@ -479,7 +479,7 @@ func TestPassthrough(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	testContext := NewFrontingContext("TestPassthrough")
+	testContext := newFrontingContext("TestPassthrough")
 	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
 	rt, ok := testContext.NewFronted(30 * time.Second)
@@ -538,7 +538,7 @@ func TestCustomValidators(t *testing.T) {
 	sadCloudValidator := NewStatusCodeValidator(sadCloudCodes)
 	testURL := "https://abc.forbidden.com/quux"
 
-	setup := func(ctx *FrontingContext, validator ResponseValidator) {
+	setup := func(ctx *frontingContext, validator ResponseValidator) {
 		masq := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
@@ -633,7 +633,7 @@ func TestCustomValidators(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testContext := NewFrontingContext(test.name)
+			testContext := newFrontingContext(test.name)
 			setup(testContext, test.validator)
 			direct, ok := testContext.NewFronted(30 * time.Second)
 			require.True(t, ok)
