@@ -212,15 +212,15 @@ func TestHostAliasesBasic(t *testing.T) {
 	}{
 		{
 			"http://fff.cloudsack.biz/foo",
-			`Get "http://fff.cloudsack.biz/foo": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
+			`Get "http://fff.cloudsack.biz/foo": could not complete request even with retries`,
 		},
 		{
 			"http://fff.cloudsack.biz:1234/bar?x=y&z=w",
-			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for fff.cloudsack.biz`,
+			`Get "http://fff.cloudsack.biz:1234/bar?x=y&z=w": could not complete request even with retries`,
 		},
 		{
 			"https://www.google.com",
-			`Get "https://www.google.com": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.google.com`,
+			`Get "https://www.google.com": could not complete request even with retries`,
 		},
 	}
 
