@@ -901,14 +901,82 @@ func TestFindWorkingMasquerades(t *testing.T) {
 	}
 }
 
+func TestMasqueradeToTry(t *testing.T) {
+	min := time.Now().Add(-time.Minute)
+	hour := time.Now().Add(-time.Hour)
+	domain1 := newMockMasqueradeWithLastSuccess("domain1.com", "1.1.1.1", 0, true, min)
+	domain2 := newMockMasqueradeWithLastSuccess("domain2.com", "2.2.2.2", 0, true, hour)
+	tests := []struct {
+		name             string
+		masquerades      sortedMasquerades
+		triedMasquerades map[MasqueradeInterface]bool
+		expected         MasqueradeInterface
+	}{
+		{
+			name: "No tried masquerades",
+			masquerades: sortedMasquerades{
+				domain1,
+				domain2,
+			},
+			triedMasquerades: map[MasqueradeInterface]bool{},
+			expected:         domain1,
+		},
+		{
+			name: "Some tried masquerades",
+			masquerades: sortedMasquerades{
+				domain1,
+				domain2,
+			},
+			triedMasquerades: map[MasqueradeInterface]bool{
+				domain1: true,
+			},
+			expected: domain2,
+		},
+		{
+			name: "All masquerades tried",
+			masquerades: sortedMasquerades{
+				domain1,
+				domain2,
+			},
+			triedMasquerades: map[MasqueradeInterface]bool{
+				domain1: true,
+				domain2: true,
+			},
+			expected: nil,
+		},
+		{
+			name:             "Empty masquerades list",
+			masquerades:      sortedMasquerades{},
+			triedMasquerades: map[MasqueradeInterface]bool{},
+			expected:         nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fronted{}
+			masquerades := tt.masquerades.sortedCopy()
+			result := f.masqueradeToTry(masquerades, tt.triedMasquerades)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // Generate a mock of a MasqueradeInterface with a Dial method that can optionally
 // return an error after a specified number of milliseconds.
 func newMockMasquerade(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockMasquerade {
+	return newMockMasqueradeWithLastSuccess(domain, ipAddress, timeout, passesCheck, time.Time{})
+}
+
+// Generate a mock of a MasqueradeInterface with a Dial method that can optionally
+// return an error after a specified number of milliseconds.
+func newMockMasqueradeWithLastSuccess(domain string, ipAddress string, timeout time.Duration, passesCheck bool, lastSucceededTime time.Time) *mockMasquerade {
 	return &mockMasquerade{
-		Domain:      domain,
-		IpAddress:   ipAddress,
-		timeout:     timeout,
-		passesCheck: passesCheck,
+		Domain:            domain,
+		IpAddress:         ipAddress,
+		timeout:           timeout,
+		passesCheck:       passesCheck,
+		lastSucceededTime: lastSucceededTime,
 	}
 }
 

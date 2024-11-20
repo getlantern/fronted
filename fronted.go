@@ -312,33 +312,57 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 
 // Dial dials out using all available masquerades until one succeeds.
 func (f *fronted) dialAll(ctx context.Context) (net.Conn, MasqueradeInterface, func(bool) bool, error) {
-	conn, m, masqueradeGood, err := f.dialAllWith(ctx, f.masquerades)
-	return conn, m, masqueradeGood, err
-}
-
-func (f *fronted) dialAllWith(ctx context.Context, masquerades sortedMasquerades) (net.Conn, MasqueradeInterface, func(bool) bool, error) {
+	defer func(op ops.Op) { op.End() }(ops.Begin("dial_all"))
 	// never take more than a minute trying to find a dialer
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
-	masqueradesToTry := masquerades.sortedCopy()
+	triedMasquerades := make(map[MasqueradeInterface]bool)
+	masqueradesToTry := f.masquerades.sortedCopy()
 	totalMasquerades := len(masqueradesToTry)
 dialLoop:
-	for _, m := range masqueradesToTry {
+	// Loop through up to len(masqueradesToTry) times, trying each masquerade in turn.
+	// If the context is done, return an error.
+	for i := 0; i < totalMasquerades; i++ {
 		select {
 		case <-ctx.Done():
-			log.Debugf("Timed out dialing to %v with %v total masquerades", m, totalMasquerades)
+			log.Debugf("Timed out dialing with %v total masquerades", totalMasquerades)
 			break dialLoop
 		default:
 			// okay
+
+		}
+
+		m, err := f.masqueradeToTry(masqueradesToTry, triedMasquerades)
+		if err != nil {
+			log.Errorf("No masquerades left to try")
+			break dialLoop
 		}
 		conn, masqueradeGood, err := f.dialMasquerade(m)
 		if err == nil {
 			return conn, m, masqueradeGood, nil
 		}
+
+		// As we're looping through the masquerades, each check takes time. As that's happening,
+		// other goroutines may be successfully vetting new masquerades, which will change the
+		// sorting. We want to make sure we're always trying the best masquerades first.
+		masqueradesToTry = f.masquerades.sortedCopy()
+		totalMasquerades = len(masqueradesToTry)
+		triedMasquerades[m] = true
 	}
 
 	return nil, nil, nil, log.Errorf("could not dial any masquerade? tried %v", totalMasquerades)
+}
+
+func (f *fronted) masqueradeToTry(masquerades sortedMasquerades, triedMasquerades map[MasqueradeInterface]bool) (MasqueradeInterface, error) {
+	for _, m := range masquerades {
+		if triedMasquerades[m] {
+			continue
+		}
+		return m, nil
+	}
+	// This should be quite rare, as it means we've tried typically thousands of masquerades.
+	return nil, errors.New("no masquerades left to try")
 }
 
 func (f *fronted) dialMasquerade(m MasqueradeInterface) (net.Conn, func(bool) bool, error) {
