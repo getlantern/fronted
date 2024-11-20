@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -958,6 +959,73 @@ func TestMasqueradeToTry(t *testing.T) {
 			masquerades := tt.masquerades.sortedCopy()
 			result, _ := f.masqueradeToTry(masquerades, tt.triedMasquerades)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDialAll(t *testing.T) {
+	tests := []struct {
+		name                string
+		masquerades         []*mockMasquerade
+		expectedSuccessful  bool
+		expectedMasquerades int
+	}{
+		{
+			name: "All successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
+				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
+			},
+			expectedSuccessful: true,
+		},
+		{
+			name: "Some successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
+				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
+			},
+			expectedSuccessful: true,
+		},
+		{
+			name: "None successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 1*time.Millisecond, false),
+				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
+				newMockMasquerade("domain3.com", "3.3.3.3", 1*time.Millisecond, false),
+				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
+			},
+			expectedSuccessful: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &fronted{}
+			d.providers = make(map[string]*Provider)
+			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
+			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
+			for i, m := range tt.masquerades {
+				d.masquerades[i] = m
+			}
+
+			ctx := context.Background()
+			conn, m, masqueradeGood, err := d.dialAll(ctx)
+
+			if tt.expectedSuccessful {
+				assert.NoError(t, err)
+				assert.NotNil(t, conn)
+				assert.NotNil(t, m)
+				assert.NotNil(t, masqueradeGood)
+			} else {
+				assert.Error(t, err)
+				assert.Nil(t, conn)
+				assert.Nil(t, m)
+				assert.Nil(t, masqueradeGood)
+			}
 		})
 	}
 }

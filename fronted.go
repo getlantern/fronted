@@ -341,7 +341,6 @@ dialLoop:
 			break dialLoop
 		default:
 			// okay
-
 		}
 
 		m, err := f.masqueradeToTry(masqueradesToTry, triedMasquerades)
@@ -350,16 +349,17 @@ dialLoop:
 			break dialLoop
 		}
 		conn, masqueradeGood, err := f.dialMasquerade(m)
-		if err == nil {
-			return conn, m, masqueradeGood, nil
-		}
-
-		// As we're looping through the masquerades, each check takes time. As that's happening,
-		// other goroutines may be successfully vetting new masquerades, which will change the
-		// sorting. We want to make sure we're always trying the best masquerades first.
-		masqueradesToTry = f.masquerades.sortedCopy()
-		totalMasquerades = len(masqueradesToTry)
 		triedMasquerades[m] = true
+		if err != nil {
+			log.Debugf("Could not dial to %v: %v", m, err)
+			// As we're looping through the masquerades, each check takes time. As that's happening,
+			// other goroutines may be successfully vetting new masquerades, which will change the
+			// sorting. We want to make sure we're always trying the best masquerades first.
+			masqueradesToTry = f.masquerades.sortedCopy()
+			totalMasquerades = len(masqueradesToTry)
+			continue
+		}
+		return conn, m, masqueradeGood, nil
 	}
 
 	return nil, nil, nil, log.Errorf("could not dial any masquerade? tried %v", totalMasquerades)
