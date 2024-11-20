@@ -258,7 +258,7 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 			return nil, nil, err
 		}
 
-		resp, conn, err := f.requestWithConn(req, conn, m, originHost, getBody, masqueradeGood)
+		resp, conn, err := f.validateMasqueradeWithConn(req, conn, m, originHost, getBody, masqueradeGood)
 		if err != nil {
 			log.Debugf("Could not complete request: %v", err)
 			continue
@@ -270,8 +270,8 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 	return nil, nil, op.FailIf(errors.New("could not complete request even with retries"))
 }
 
-func (f *fronted) requestWithConn(req *http.Request, conn net.Conn, m MasqueradeInterface, originHost string, getBody func() io.ReadCloser, masqueradeGood func(bool) bool) (*http.Response, net.Conn, error) {
-	op := ops.Begin("request_with_conn")
+func (f *fronted) validateMasqueradeWithConn(req *http.Request, conn net.Conn, m MasqueradeInterface, originHost string, getBody func() io.ReadCloser, masqueradeGood func(bool) bool) (*http.Response, net.Conn, error) {
+	op := ops.Begin("validate_masquerade_with_conn")
 	defer op.End()
 	provider := f.providerFor(m)
 	if provider == nil {
