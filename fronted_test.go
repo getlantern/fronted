@@ -132,7 +132,7 @@ func TestVet(t *testing.T) {
 	t.Fatal("None of the default masquerades vetted successfully")
 }
 
-func TestLoadCandidates(t *testing.T) {
+func TestLoadMasquerades(t *testing.T) {
 	providers := testProviders()
 
 	expected := make(map[Masquerade]bool)
@@ -142,11 +142,11 @@ func TestLoadCandidates(t *testing.T) {
 		}
 	}
 
-	d := &fronted{
-		masquerades: make(sortedMasquerades, 0, len(expected)),
-	}
+	newMasquerades := loadMasquerades(providers, len(expected))
 
-	d.loadCandidates(providers)
+	d := &fronted{
+		masquerades: newMasquerades,
+	}
 
 	actual := make(map[Masquerade]bool)
 	count := 0

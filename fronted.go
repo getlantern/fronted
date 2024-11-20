@@ -62,25 +62,25 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 		return nil, fmt.Errorf("no masquerades found in providers")
 	}
 
+	// copy providers
+	providersCopy := make(map[string]*Provider, len(providers))
+	for k, p := range providers {
+		providersCopy[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
+	}
+
 	f := &fronted{
 		certPool:            pool,
-		masquerades:         make(sortedMasquerades, 0, size),
+		masquerades:         loadMasquerades(providersCopy, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
 		cacheDirty:          make(chan interface{}, 1),
 		cacheClosed:         make(chan interface{}),
 		defaultProviderID:   defaultProviderID,
-		providers:           make(map[string]*Provider),
+		providers:           providersCopy,
 		clientHelloID:       clientHelloID,
 	}
 
-	// copy providers
-	for k, p := range providers {
-		f.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
-	}
-
-	f.loadCandidates(f.providers)
 	if cacheFile != "" {
 		f.initCaching(cacheFile)
 	}
@@ -89,14 +89,14 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 	return f, nil
 }
 
-func (f *fronted) loadCandidates(initial map[string]*Provider) {
+func loadMasquerades(initial map[string]*Provider, size int) sortedMasquerades {
 	log.Debugf("Loading candidates for %d providers", len(initial))
 	defer log.Debug("Finished loading candidates")
 
+	masquerades := make(sortedMasquerades, 0, size)
 	for key, p := range initial {
 		arr := p.Masquerades
 		size := len(arr)
-		log.Debugf("Adding %d candidates for %v", size, key)
 
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
@@ -108,9 +108,10 @@ func (f *fronted) loadCandidates(initial map[string]*Provider) {
 		}
 
 		for _, c := range sh {
-			f.masquerades = append(f.masquerades, &masquerade{Masquerade: *c, ProviderID: key})
+			masquerades = append(masquerades, &masquerade{Masquerade: *c, ProviderID: key})
 		}
 	}
+	return masquerades
 }
 
 func (f *fronted) providerFor(m MasqueradeInterface) *Provider {
