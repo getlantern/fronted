@@ -956,7 +956,7 @@ func TestMasqueradeToTry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fronted{}
 			masquerades := tt.masquerades.sortedCopy()
-			result := f.masqueradeToTry(masquerades, tt.triedMasquerades)
+			result, _ := f.masqueradeToTry(masquerades, tt.triedMasquerades)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
