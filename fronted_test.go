@@ -442,27 +442,27 @@ func TestPassthrough(t *testing.T) {
 	}{
 		{
 			"http://www.notok.cloudsack.biz",
-			`Get "http://www.notok.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.notok.cloudsack.biz`,
+			`Get "http://www.notok.cloudsack.biz": could not complete request even with retries`,
 		},
 		{
 			"http://ok.cloudsack.biz",
-			`Get "http://ok.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for ok.cloudsack.biz`,
+			`Get "http://ok.cloudsack.biz": could not complete request even with retries`,
 		},
 		{
 			"http://www.abc.cloudsack.biz",
-			`Get "http://www.abc.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.abc.cloudsack.biz`,
+			`Get "http://www.abc.cloudsack.biz": could not complete request even with retries`,
 		},
 		{
 			"http://noabc.cloudsack.biz",
-			`Get "http://noabc.cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for noabc.cloudsack.biz`,
+			`Get "http://noabc.cloudsack.biz": could not complete request even with retries`,
 		},
 		{
 			"http://cloudsack.biz",
-			`Get "http://cloudsack.biz": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for cloudsack.biz`,
+			`Get "http://cloudsack.biz": could not complete request even with retries`,
 		},
 		{
 			"https://www.google.com",
-			`Get "https://www.google.com": no domain fronting mapping for 'cloudsack'. Please add it to provider_map.yaml or equivalent for www.google.com`,
+			`Get "https://www.google.com": could not complete request even with retries`,
 		},
 	}
 
