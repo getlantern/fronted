@@ -257,57 +257,68 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 			op.FailIf(err)
 			return nil, nil, err
 		}
-		provider := f.providerFor(m)
-		if provider == nil {
-			log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", m.getProviderID())
-			masqueradeGood(false)
-			continue
-		}
-		frontedHost := provider.Lookup(originHost)
-		if frontedHost == "" {
-			// this error is not the masquerade's fault in particular
-			// so it is returned as good.
-			conn.Close()
-			masqueradeGood(true)
-			err := fmt.Errorf("no domain fronting mapping for '%s'. Please add it to provider_map.yaml or equivalent for %s",
-				m.getProviderID(), originHost)
-			op.FailIf(err)
-			return nil, nil, err
-		}
-		log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.getProviderID())
 
-		reqi, err := cloneRequestWith(req, frontedHost, getBody())
-		if err != nil {
-			return nil, nil, op.FailIf(log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err))
-		}
-
-		// don't clobber/confuse Connection header on Upgrade requests.
-		disableKeepAlives := true
-		if strings.EqualFold(reqi.Header.Get("Connection"), "upgrade") {
-			disableKeepAlives = false
-		}
-
-		tr := frontedHTTPTransport(conn, disableKeepAlives)
-		resp, err := tr.RoundTrip(reqi)
+		resp, conn, err := f.validateMasqueradeWithConn(req, conn, m, originHost, getBody, masqueradeGood)
 		if err != nil {
 			log.Debugf("Could not complete request: %v", err)
-			masqueradeGood(false)
 			continue
 		}
 
-		err = provider.ValidateResponse(resp)
-		if err != nil {
-			log.Debugf("Could not complete request: %v", err)
-			resp.Body.Close()
-			masqueradeGood(false)
-			continue
-		}
-
-		masqueradeGood(true)
 		return resp, conn, nil
 	}
 
 	return nil, nil, op.FailIf(errors.New("could not complete request even with retries"))
+}
+
+func (f *fronted) validateMasqueradeWithConn(req *http.Request, conn net.Conn, m MasqueradeInterface, originHost string, getBody func() io.ReadCloser, masqueradeGood func(bool) bool) (*http.Response, net.Conn, error) {
+	op := ops.Begin("validate_masquerade_with_conn")
+	defer op.End()
+	provider := f.providerFor(m)
+	if provider == nil {
+		log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", m.getProviderID())
+		masqueradeGood(false)
+		return nil, nil, op.FailIf(log.Errorf("Skipping masquerade with disabled/unknown provider '%s'", m.getProviderID()))
+	}
+	frontedHost := provider.Lookup(originHost)
+	if frontedHost == "" {
+		// this error is not the masquerade's fault in particular
+		// so it is returned as good.
+		conn.Close()
+		masqueradeGood(true)
+		err := fmt.Errorf("no domain fronting mapping for '%s'. Please add it to provider_map.yaml or equivalent for %s",
+			m.getProviderID(), originHost)
+		op.FailIf(err)
+		return nil, nil, err
+	}
+	log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.getProviderID())
+
+	reqi, err := cloneRequestWith(req, frontedHost, getBody())
+	if err != nil {
+		return nil, nil, op.FailIf(log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err))
+	}
+	disableKeepAlives := true
+	if strings.EqualFold(reqi.Header.Get("Connection"), "upgrade") {
+		disableKeepAlives = false
+	}
+
+	tr := frontedHTTPTransport(conn, disableKeepAlives)
+	resp, err := tr.RoundTrip(reqi)
+	if err != nil {
+		log.Debugf("Could not complete request: %v", err)
+		masqueradeGood(false)
+		return nil, nil, err
+	}
+
+	err = provider.ValidateResponse(resp)
+	if err != nil {
+		log.Debugf("Could not complete request: %v", err)
+		resp.Body.Close()
+		masqueradeGood(false)
+		return nil, nil, err
+	}
+
+	masqueradeGood(true)
+	return resp, conn, nil
 }
 
 // Dial dials out using all available masquerades until one succeeds.
@@ -515,6 +526,8 @@ type directTransport struct {
 }
 
 func (ddf *directTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	defer func(op ops.Op) { op.End() }(ops.Begin("direct_transport_roundtrip"))
+
 	// The connection is already encrypted by domain fronting.  We need to rewrite URLs starting
 	// with "https://" to "http://", lest we get an error for doubling up on TLS.
 
