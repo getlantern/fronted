@@ -62,25 +62,25 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 		return nil, fmt.Errorf("no masquerades found in providers")
 	}
 
+	// copy providers
+	providersCopy := make(map[string]*Provider, len(providers))
+	for k, p := range providers {
+		providersCopy[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
+	}
+
 	f := &fronted{
 		certPool:            pool,
-		masquerades:         make(sortedMasquerades, 0, size),
+		masquerades:         loadMasquerades(providersCopy, size),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
 		cacheDirty:          make(chan interface{}, 1),
 		cacheClosed:         make(chan interface{}),
 		defaultProviderID:   defaultProviderID,
-		providers:           make(map[string]*Provider),
+		providers:           providersCopy,
 		clientHelloID:       clientHelloID,
 	}
 
-	// copy providers
-	for k, p := range providers {
-		f.providers[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
-	}
-
-	f.loadCandidates(f.providers)
 	if cacheFile != "" {
 		f.initCaching(cacheFile)
 	}
@@ -89,14 +89,14 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 	return f, nil
 }
 
-func (f *fronted) loadCandidates(initial map[string]*Provider) {
+func loadMasquerades(initial map[string]*Provider, size int) sortedMasquerades {
 	log.Debugf("Loading candidates for %d providers", len(initial))
 	defer log.Debug("Finished loading candidates")
 
+	masquerades := make(sortedMasquerades, 0, size)
 	for key, p := range initial {
 		arr := p.Masquerades
 		size := len(arr)
-		log.Debugf("Adding %d candidates for %v", size, key)
 
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
@@ -108,9 +108,10 @@ func (f *fronted) loadCandidates(initial map[string]*Provider) {
 		}
 
 		for _, c := range sh {
-			f.masquerades = append(f.masquerades, &masquerade{Masquerade: *c, ProviderID: key})
+			masquerades = append(masquerades, &masquerade{Masquerade: *c, ProviderID: key})
 		}
 	}
+	return masquerades
 }
 
 func (f *fronted) providerFor(m MasqueradeInterface) *Provider {
@@ -323,34 +324,57 @@ func (f *fronted) validateMasqueradeWithConn(req *http.Request, conn net.Conn, m
 
 // Dial dials out using all available masquerades until one succeeds.
 func (f *fronted) dialAll(ctx context.Context) (net.Conn, MasqueradeInterface, func(bool) bool, error) {
-	conn, m, masqueradeGood, err := f.dialAllWith(ctx, f.masquerades)
-	return conn, m, masqueradeGood, err
-}
-
-func (f *fronted) dialAllWith(ctx context.Context, masquerades sortedMasquerades) (net.Conn, MasqueradeInterface, func(bool) bool, error) {
-	defer func(op ops.Op) { op.End() }(ops.Begin("dial_all_with"))
+	defer func(op ops.Op) { op.End() }(ops.Begin("dial_all"))
 	// never take more than a minute trying to find a dialer
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
-	masqueradesToTry := masquerades.sortedCopy()
+	triedMasquerades := make(map[MasqueradeInterface]bool)
+	masqueradesToTry := f.masquerades.sortedCopy()
 	totalMasquerades := len(masqueradesToTry)
 dialLoop:
-	for _, m := range masqueradesToTry {
+	// Loop through up to len(masqueradesToTry) times, trying each masquerade in turn.
+	// If the context is done, return an error.
+	for i := 0; i < totalMasquerades; i++ {
 		select {
 		case <-ctx.Done():
-			log.Debugf("Timed out dialing to %v with %v total masquerades", m, totalMasquerades)
+			log.Debugf("Timed out dialing with %v total masquerades", totalMasquerades)
 			break dialLoop
 		default:
 			// okay
 		}
-		conn, masqueradeGood, err := f.dialMasquerade(m)
-		if err == nil {
-			return conn, m, masqueradeGood, nil
+
+		m, err := f.masqueradeToTry(masqueradesToTry, triedMasquerades)
+		if err != nil {
+			log.Errorf("No masquerades left to try")
+			break dialLoop
 		}
+		conn, masqueradeGood, err := f.dialMasquerade(m)
+		triedMasquerades[m] = true
+		if err != nil {
+			log.Debugf("Could not dial to %v: %v", m, err)
+			// As we're looping through the masquerades, each check takes time. As that's happening,
+			// other goroutines may be successfully vetting new masquerades, which will change the
+			// sorting. We want to make sure we're always trying the best masquerades first.
+			masqueradesToTry = f.masquerades.sortedCopy()
+			totalMasquerades = len(masqueradesToTry)
+			continue
+		}
+		return conn, m, masqueradeGood, nil
 	}
 
 	return nil, nil, nil, log.Errorf("could not dial any masquerade? tried %v", totalMasquerades)
+}
+
+func (f *fronted) masqueradeToTry(masquerades sortedMasquerades, triedMasquerades map[MasqueradeInterface]bool) (MasqueradeInterface, error) {
+	for _, m := range masquerades {
+		if triedMasquerades[m] {
+			continue
+		}
+		return m, nil
+	}
+	// This should be quite rare, as it means we've tried typically thousands of masquerades.
+	return nil, errors.New("no masquerades left to try")
 }
 
 func (f *fronted) dialMasquerade(m MasqueradeInterface) (net.Conn, func(bool) bool, error) {

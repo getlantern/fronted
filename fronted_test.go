@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -131,7 +132,7 @@ func TestVet(t *testing.T) {
 	t.Fatal("None of the default masquerades vetted successfully")
 }
 
-func TestLoadCandidates(t *testing.T) {
+func TestLoadMasquerades(t *testing.T) {
 	providers := testProviders()
 
 	expected := make(map[Masquerade]bool)
@@ -141,11 +142,11 @@ func TestLoadCandidates(t *testing.T) {
 		}
 	}
 
-	d := &fronted{
-		masquerades: make(sortedMasquerades, 0, len(expected)),
-	}
+	newMasquerades := loadMasquerades(providers, len(expected))
 
-	d.loadCandidates(providers)
+	d := &fronted{
+		masquerades: newMasquerades,
+	}
 
 	actual := make(map[Masquerade]bool)
 	count := 0
@@ -901,14 +902,149 @@ func TestFindWorkingMasquerades(t *testing.T) {
 	}
 }
 
+func TestMasqueradeToTry(t *testing.T) {
+	min := time.Now().Add(-time.Minute)
+	hour := time.Now().Add(-time.Hour)
+	domain1 := newMockMasqueradeWithLastSuccess("domain1.com", "1.1.1.1", 0, true, min)
+	domain2 := newMockMasqueradeWithLastSuccess("domain2.com", "2.2.2.2", 0, true, hour)
+	tests := []struct {
+		name             string
+		masquerades      sortedMasquerades
+		triedMasquerades map[MasqueradeInterface]bool
+		expected         MasqueradeInterface
+	}{
+		{
+			name: "No tried masquerades",
+			masquerades: sortedMasquerades{
+				domain1,
+				domain2,
+			},
+			triedMasquerades: map[MasqueradeInterface]bool{},
+			expected:         domain1,
+		},
+		{
+			name: "Some tried masquerades",
+			masquerades: sortedMasquerades{
+				domain1,
+				domain2,
+			},
+			triedMasquerades: map[MasqueradeInterface]bool{
+				domain1: true,
+			},
+			expected: domain2,
+		},
+		{
+			name: "All masquerades tried",
+			masquerades: sortedMasquerades{
+				domain1,
+				domain2,
+			},
+			triedMasquerades: map[MasqueradeInterface]bool{
+				domain1: true,
+				domain2: true,
+			},
+			expected: nil,
+		},
+		{
+			name:             "Empty masquerades list",
+			masquerades:      sortedMasquerades{},
+			triedMasquerades: map[MasqueradeInterface]bool{},
+			expected:         nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fronted{}
+			masquerades := tt.masquerades.sortedCopy()
+			result, _ := f.masqueradeToTry(masquerades, tt.triedMasquerades)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDialAll(t *testing.T) {
+	tests := []struct {
+		name                string
+		masquerades         []*mockMasquerade
+		expectedSuccessful  bool
+		expectedMasquerades int
+	}{
+		{
+			name: "All successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
+				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
+			},
+			expectedSuccessful: true,
+		},
+		{
+			name: "Some successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
+				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
+				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
+			},
+			expectedSuccessful: true,
+		},
+		{
+			name: "None successful",
+			masquerades: []*mockMasquerade{
+				newMockMasquerade("domain1.com", "1.1.1.1", 1*time.Millisecond, false),
+				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
+				newMockMasquerade("domain3.com", "3.3.3.3", 1*time.Millisecond, false),
+				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
+			},
+			expectedSuccessful: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &fronted{}
+			d.providers = make(map[string]*Provider)
+			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
+			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
+			for i, m := range tt.masquerades {
+				d.masquerades[i] = m
+			}
+
+			ctx := context.Background()
+			conn, m, masqueradeGood, err := d.dialAll(ctx)
+
+			if tt.expectedSuccessful {
+				assert.NoError(t, err)
+				assert.NotNil(t, conn)
+				assert.NotNil(t, m)
+				assert.NotNil(t, masqueradeGood)
+			} else {
+				assert.Error(t, err)
+				assert.Nil(t, conn)
+				assert.Nil(t, m)
+				assert.Nil(t, masqueradeGood)
+			}
+		})
+	}
+}
+
 // Generate a mock of a MasqueradeInterface with a Dial method that can optionally
 // return an error after a specified number of milliseconds.
 func newMockMasquerade(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockMasquerade {
+	return newMockMasqueradeWithLastSuccess(domain, ipAddress, timeout, passesCheck, time.Time{})
+}
+
+// Generate a mock of a MasqueradeInterface with a Dial method that can optionally
+// return an error after a specified number of milliseconds.
+func newMockMasqueradeWithLastSuccess(domain string, ipAddress string, timeout time.Duration, passesCheck bool, lastSucceededTime time.Time) *mockMasquerade {
 	return &mockMasquerade{
-		Domain:      domain,
-		IpAddress:   ipAddress,
-		timeout:     timeout,
-		passesCheck: passesCheck,
+		Domain:            domain,
+		IpAddress:         ipAddress,
+		timeout:           timeout,
+		passesCheck:       passesCheck,
+		lastSucceededTime: lastSucceededTime,
 	}
 }
 
