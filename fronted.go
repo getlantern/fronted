@@ -2,7 +2,6 @@ package fronted
 
 import (
 	"bytes"
-	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -34,6 +33,12 @@ var (
 	log = golog.LoggerFor("fronted")
 )
 
+type workingFronts interface {
+	onConnected(m MasqueradeInterface, connectTime time.Duration)
+	onError(m MasqueradeInterface)
+	workingFront() (MasqueradeInterface, error)
+}
+
 // fronted identifies working IP address/domain pairings for domain fronting and is
 // an implementation of http.RoundTripper for the convenience of callers.
 type fronted struct {
@@ -48,11 +53,16 @@ type fronted struct {
 	defaultProviderID   string
 	providers           map[string]*Provider
 	clientHelloID       tls.ClientHelloID
+	workingFronts       workingFronts
+	providersMu         sync.RWMutex
+	masqueradesMu       sync.RWMutex
+	frontedMu           sync.RWMutex
 }
 
 func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 	defaultProviderID, cacheFile string, clientHelloID tls.ClientHelloID,
-	listener func(f *fronted)) (*fronted, error) {
+	listener func(f *fronted),
+	workingFronts workingFronts) (*fronted, error) {
 	size := 0
 	for _, p := range providers {
 		size += len(p.Masquerades)
@@ -63,10 +73,7 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 	}
 
 	// copy providers
-	providersCopy := make(map[string]*Provider, len(providers))
-	for k, p := range providers {
-		providersCopy[k] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
-	}
+	providersCopy := copyProviders(providers)
 
 	f := &fronted{
 		certPool:            pool,
@@ -79,6 +86,7 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 		defaultProviderID:   defaultProviderID,
 		providers:           providersCopy,
 		clientHelloID:       clientHelloID,
+		workingFronts:       workingFronts,
 	}
 
 	if cacheFile != "" {
@@ -87,6 +95,15 @@ func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 	f.findWorkingMasquerades(listener)
 
 	return f, nil
+}
+
+func copyProviders(providers map[string]*Provider) map[string]*Provider {
+	providersCopy := make(map[string]*Provider, len(providers))
+	for key, p := range providers {
+		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
+		log.Debugf("Domain fronting provider is %v", providersCopy[key])
+	}
+	return providersCopy
 }
 
 func loadMasquerades(initial map[string]*Provider, size int) sortedMasquerades {
@@ -112,6 +129,34 @@ func loadMasquerades(initial map[string]*Provider, size int) sortedMasquerades {
 		}
 	}
 	return masquerades
+}
+
+func (f *fronted) updateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string) {
+	// Make copies just to avoid any concurrency issues with access that may be happening on the
+	// caller side.
+	providersCopy := copyProviders(providers)
+	f.frontedMu.Lock()
+	defer f.frontedMu.Unlock()
+	f.addProviders(providersCopy)
+	f.addMasquerades(loadMasquerades(providersCopy, len(providersCopy)))
+	f.defaultProviderID = defaultProviderID
+	f.certPool = pool
+}
+
+func (f *fronted) addProviders(providers map[string]*Provider) {
+	// Add new providers to the existing providers map, overwriting any existing ones.
+	f.providersMu.Lock()
+	defer f.providersMu.Unlock()
+	for key, p := range providers {
+		f.providers[key] = p
+	}
+}
+
+func (f *fronted) addMasquerades(masquerades sortedMasquerades) {
+	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
+	f.masqueradesMu.Lock()
+	defer f.masqueradesMu.Unlock()
+	f.masquerades = append(masquerades, f.masquerades...)
 }
 
 func (f *fronted) providerFor(m MasqueradeInterface) *Provider {
@@ -149,35 +194,51 @@ func (f *fronted) findWorkingMasquerades(listener func(f *fronted)) {
 	var successful atomic.Uint32
 
 	// We loop through all of them until we have 4 successful ones.
-	for i := 0; i < len(f.masquerades) && successful.Load() < 4; i += batchSize {
+	for i := 0; i < f.masqueradeSize() && successful.Load() < 4; i += batchSize {
 		f.vetBatch(i, batchSize, &successful, listener)
 	}
+}
+
+func (f *fronted) masqueradeSize() int {
+	f.masqueradesMu.Lock()
+	defer f.masqueradesMu.Unlock()
+	return len(f.masquerades)
+}
+
+func (f *fronted) masqueradeAt(i int) MasqueradeInterface {
+	f.masqueradesMu.Lock()
+	defer f.masqueradesMu.Unlock()
+	return f.masquerades[i]
 }
 
 func (f *fronted) vetBatch(start, batchSize int, successful *atomic.Uint32, listener func(f *fronted)) {
 	log.Debugf("Vetting masquerade batch %d-%d", start, start+batchSize)
 	var wg sync.WaitGroup
-	masqueradeSize := len(f.masquerades)
-	for i := start; i < start+batchSize && i < masqueradeSize; i++ {
+	for i := start; i < start+batchSize && i < f.masqueradeSize(); i++ {
 		wg.Add(1)
 		go func(m MasqueradeInterface) {
 			defer wg.Done()
-			if f.vetMasquerade(m) {
+			working, connectTime := f.vetMasquerade(m)
+			if working {
 				successful.Add(1)
+				f.workingFronts.onConnected(m, connectTime)
 				if listener != nil {
 					go listener(f)
 				}
+			} else {
+				f.workingFronts.onError(m)
 			}
-		}(f.masquerades[i])
+		}(f.masqueradeAt(i))
 	}
 	wg.Wait()
 }
 
-func (f *fronted) vetMasquerade(m MasqueradeInterface) bool {
+func (f *fronted) vetMasquerade(m MasqueradeInterface) (bool, time.Duration) {
+	start := time.Now()
 	conn, masqueradeGood, err := f.dialMasquerade(m)
 	if err != nil {
 		log.Debugf("unexpected error vetting masquerades: %v", err)
-		return false
+		return false, time.Since(start)
 	}
 	defer func() {
 		if conn != nil {
@@ -189,15 +250,15 @@ func (f *fronted) vetMasquerade(m MasqueradeInterface) bool {
 	if provider == nil {
 		log.Debugf("Skipping masquerade with disabled/unknown provider id '%s' not in %v",
 			m.getProviderID(), f.providers)
-		return false
+		return false, time.Since(start)
 	}
 	if !masqueradeGood(m.postCheck(conn, provider.TestURL)) {
 		log.Debugf("Unsuccessful vetting with POST request, discarding masquerade")
-		return false
+		return false, time.Since(start)
 	}
 
 	log.Debugf("Successfully vetted one masquerade %v", m)
-	return true
+	return true, time.Since(start)
 }
 
 // RoundTrip loops through all available masquerades, sorted by the one that most recently
@@ -242,37 +303,41 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 		return io.NopCloser(bytes.NewReader(body))
 	}
 
-	tries := 1
-	if isIdempotent {
-		tries = maxTries
-	}
+	const tries = 6
 
 	for i := 0; i < tries; i++ {
 		if i > 0 {
 			log.Debugf("Retrying domain-fronted request, pass %d", i)
 		}
 
-		conn, m, masqueradeGood, err := f.dialAll(req.Context())
+		m, err := f.workingFronts.workingFront()
 		if err != nil {
-			// unable to find good masquerade, fail
-			op.FailIf(err)
-			return nil, nil, err
-		}
-
-		resp, conn, err := f.validateMasqueradeWithConn(req, conn, m, originHost, getBody, masqueradeGood)
-		if err != nil {
-			log.Debugf("Could not complete request: %v", err)
+			// For some reason we have no working fronts. Sleep for a bit and try again.
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		return resp, conn, nil
+		conn, masqueradeGood, err := f.dialMasquerade(m)
+		if err != nil {
+			log.Debugf("Could not dial to %v: %v", m, err)
+			f.workingFronts.onError(m)
+			continue
+		}
+
+		resp, conn, err := f.request(req, conn, m, originHost, getBody, masqueradeGood)
+		if err != nil {
+			log.Debugf("Could not complete request: %v", err)
+			f.workingFronts.onError(m)
+		} else {
+			return resp, conn, nil
+		}
 	}
 
 	return nil, nil, op.FailIf(errors.New("could not complete request even with retries"))
 }
 
-func (f *fronted) validateMasqueradeWithConn(req *http.Request, conn net.Conn, m MasqueradeInterface, originHost string, getBody func() io.ReadCloser, masqueradeGood func(bool) bool) (*http.Response, net.Conn, error) {
-	op := ops.Begin("validate_masquerade_with_conn")
+func (f *fronted) request(req *http.Request, conn net.Conn, m MasqueradeInterface, originHost string, getBody func() io.ReadCloser, masqueradeGood func(bool) bool) (*http.Response, net.Conn, error) {
+	op := ops.Begin("fronted_request")
 	defer op.End()
 	provider := f.providerFor(m)
 	if provider == nil {
@@ -320,61 +385,6 @@ func (f *fronted) validateMasqueradeWithConn(req *http.Request, conn net.Conn, m
 
 	masqueradeGood(true)
 	return resp, conn, nil
-}
-
-// Dial dials out using all available masquerades until one succeeds.
-func (f *fronted) dialAll(ctx context.Context) (net.Conn, MasqueradeInterface, func(bool) bool, error) {
-	defer func(op ops.Op) { op.End() }(ops.Begin("dial_all"))
-	// never take more than a minute trying to find a dialer
-	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
-	defer cancel()
-
-	triedMasquerades := make(map[MasqueradeInterface]bool)
-	masqueradesToTry := f.masquerades.sortedCopy()
-	totalMasquerades := len(masqueradesToTry)
-dialLoop:
-	// Loop through up to len(masqueradesToTry) times, trying each masquerade in turn.
-	// If the context is done, return an error.
-	for i := 0; i < totalMasquerades; i++ {
-		select {
-		case <-ctx.Done():
-			log.Debugf("Timed out dialing with %v total masquerades", totalMasquerades)
-			break dialLoop
-		default:
-			// okay
-		}
-
-		m, err := f.masqueradeToTry(masqueradesToTry, triedMasquerades)
-		if err != nil {
-			log.Errorf("No masquerades left to try")
-			break dialLoop
-		}
-		conn, masqueradeGood, err := f.dialMasquerade(m)
-		triedMasquerades[m] = true
-		if err != nil {
-			log.Debugf("Could not dial to %v: %v", m, err)
-			// As we're looping through the masquerades, each check takes time. As that's happening,
-			// other goroutines may be successfully vetting new masquerades, which will change the
-			// sorting. We want to make sure we're always trying the best masquerades first.
-			masqueradesToTry = f.masquerades.sortedCopy()
-			totalMasquerades = len(masqueradesToTry)
-			continue
-		}
-		return conn, m, masqueradeGood, nil
-	}
-
-	return nil, nil, nil, log.Errorf("could not dial any masquerade? tried %v", totalMasquerades)
-}
-
-func (f *fronted) masqueradeToTry(masquerades sortedMasquerades, triedMasquerades map[MasqueradeInterface]bool) (MasqueradeInterface, error) {
-	for _, m := range masquerades {
-		if triedMasquerades[m] {
-			continue
-		}
-		return m, nil
-	}
-	// This should be quite rare, as it means we've tried typically thousands of masquerades.
-	return nil, errors.New("no masquerades left to try")
 }
 
 func (f *fronted) dialMasquerade(m MasqueradeInterface) (net.Conn, func(bool) bool, error) {

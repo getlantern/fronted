@@ -12,7 +12,17 @@ import (
 	"github.com/getlantern/eventual/v2"
 )
 
+// Create an interface for the fronting context
+type Fronting interface {
+	UpdateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string)
+	NewRoundTripper(timeout time.Duration) (http.RoundTripper, bool)
+	Close()
+}
+
 var defaultContext = newFrontingContext("default")
+
+// Make sure that the default context is a Fronting
+var _ Fronting = defaultContext
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
 // cache file for caching masquerades to set up direct domain fronting
@@ -20,45 +30,42 @@ var defaultContext = newFrontingContext("default")
 //
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (eg in a cache file)
-func Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) {
-	if err := defaultContext.Configure(pool, providers, defaultProviderID, cacheFile); err != nil {
-		log.Errorf("Error configuring fronting %s context: %s!!", defaultContext.name, err)
+func NewFronter(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) (Fronting, error) {
+	if err := defaultContext.configure(pool, providers, defaultProviderID, cacheFile); err != nil {
+		return nil, log.Errorf("Error configuring fronting %s context: %s!!", defaultContext.name, err)
 	}
-}
-
-// NewFronted creates a new http.RoundTripper that does direct domain fronting
-// using the default context. If the default context isn't configured within
-// the given timeout, this method returns nil, false.
-func NewFronted(timeout time.Duration) (http.RoundTripper, bool) {
-	return defaultContext.NewFronted(timeout)
-}
-
-// Close closes any existing cache file in the default context
-func Close() {
-	defaultContext.Close()
+	return defaultContext, nil
 }
 
 func newFrontingContext(name string) *frontingContext {
 	return &frontingContext{
-		name:     name,
-		instance: eventual.NewValue(),
+		name:             name,
+		instance:         eventual.NewValue(),
+		connectingFronts: newConnectingFronts(),
 	}
 }
 
 type frontingContext struct {
-	name     string
-	instance eventual.Value
+	name             string
+	instance         eventual.Value
+	fronted          *fronted
+	connectingFronts *connectingFronts
 }
 
-// Configure sets the masquerades to use, the trusted root CAs, and the
+// UpdateConfig updates the configuration of the fronting context
+func (fctx *frontingContext) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string) {
+	fctx.fronted.updateConfig(pool, providers, defaultProviderID)
+}
+
+// configure sets the masquerades to use, the trusted root CAs, and the
 // cache file for caching masquerades to set up direct domain fronting.
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (eg in a cache file)
-func (fctx *frontingContext) Configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) error {
-	return fctx.ConfigureWithHello(pool, providers, defaultProviderID, cacheFile, tls.ClientHelloID{})
+func (fctx *frontingContext) configure(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) error {
+	return fctx.configureWithHello(pool, providers, defaultProviderID, cacheFile, tls.ClientHelloID{})
 }
 
-func (fctx *frontingContext) ConfigureWithHello(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string, clientHelloID tls.ClientHelloID) error {
+func (fctx *frontingContext) configureWithHello(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string, clientHelloID tls.ClientHelloID) error {
 	log.Debugf("Configuring fronted %s context", fctx.name)
 
 	if len(providers) == 0 {
@@ -73,10 +80,11 @@ func (fctx *frontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 		existing.closeCache()
 	}
 
-	_, err := newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID, func(f *fronted) {
+	var err error
+	fctx.fronted, err = newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID, func(f *fronted) {
 		log.Debug("Setting fronted instance")
 		fctx.instance.Set(f)
-	})
+	}, fctx.connectingFronts)
 	if err != nil {
 		return err
 	}
@@ -86,7 +94,7 @@ func (fctx *frontingContext) ConfigureWithHello(pool *x509.CertPool, providers m
 // NewFronted creates a new http.RoundTripper that does direct domain fronting.
 // If the context isn't configured within the given timeout, this method
 // returns nil, false.
-func (fctx *frontingContext) NewFronted(timeout time.Duration) (http.RoundTripper, bool) {
+func (fctx *frontingContext) NewRoundTripper(timeout time.Duration) (http.RoundTripper, bool) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

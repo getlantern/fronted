@@ -1,7 +1,6 @@
 package fronted
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -58,9 +57,9 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
 	testContext := newFrontingContext("TestDirectDomainFrontingWithSNIConfig")
-	testContext.Configure(certs, p, "akamai", cacheFile)
+	testContext.configure(certs, p, "akamai", cacheFile)
 
-	transport, ok := testContext.NewFronted(30 * time.Second)
+	transport, ok := testContext.NewRoundTripper(30 * time.Second)
 	require.True(t, ok)
 	client := &http.Client{
 		Transport: transport,
@@ -87,9 +86,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
 	testContext := newFrontingContext("doTestDomainFronting")
-	testContext.Configure(certs, p, testProviderID, cacheFile)
+	testContext.configure(certs, p, testProviderID, cacheFile)
 
-	transport, ok := testContext.NewFronted(30 * time.Second)
+	transport, ok := testContext.NewRoundTripper(30 * time.Second)
 	require.True(t, ok)
 
 	client := &http.Client{
@@ -98,7 +97,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	transport, ok = testContext.NewFronted(30 * time.Second)
+	transport, ok = testContext.NewRoundTripper(30 * time.Second)
 	require.True(t, ok)
 	client = &http.Client{
 		Transport: transport,
@@ -242,9 +241,9 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 
 	testContext := newFrontingContext("TestHostAliasesBasic")
-	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+	testContext.configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := testContext.NewFronted(30 * time.Second)
+	rt, ok := testContext.NewRoundTripper(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -355,8 +354,8 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	testContext := newFrontingContext("TestHostAliasesMulti")
-	testContext.Configure(certs, providers, "cloudsack", "")
-	rt, ok := testContext.NewFronted(30 * time.Second)
+	testContext.configure(certs, providers, "cloudsack", "")
+	rt, ok := testContext.NewRoundTripper(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -482,9 +481,9 @@ func TestPassthrough(t *testing.T) {
 	certs.AddCert(cloudSack.Certificate())
 
 	testContext := newFrontingContext("TestPassthrough")
-	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+	testContext.configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
-	rt, ok := testContext.NewFronted(30 * time.Second)
+	rt, ok := testContext.NewRoundTripper(30 * time.Second)
 	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
@@ -554,7 +553,7 @@ func TestCustomValidators(t *testing.T) {
 			"sadcloud": p,
 		}
 
-		ctx.Configure(certs, providers, "sadcloud", "")
+		ctx.configure(certs, providers, "sadcloud", "")
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
@@ -637,7 +636,7 @@ func TestCustomValidators(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testContext := newFrontingContext(test.name)
 			setup(testContext, test.validator)
-			direct, ok := testContext.NewFronted(30 * time.Second)
+			direct, ok := testContext.NewRoundTripper(30 * time.Second)
 			require.True(t, ok)
 			client := &http.Client{
 				Transport: direct,
@@ -898,134 +897,6 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			}
 
 			assert.GreaterOrEqual(t, int(successful.Load()), tt.expectedSuccessful)
-		})
-	}
-}
-
-func TestMasqueradeToTry(t *testing.T) {
-	min := time.Now().Add(-time.Minute)
-	hour := time.Now().Add(-time.Hour)
-	domain1 := newMockMasqueradeWithLastSuccess("domain1.com", "1.1.1.1", 0, true, min)
-	domain2 := newMockMasqueradeWithLastSuccess("domain2.com", "2.2.2.2", 0, true, hour)
-	tests := []struct {
-		name             string
-		masquerades      sortedMasquerades
-		triedMasquerades map[MasqueradeInterface]bool
-		expected         MasqueradeInterface
-	}{
-		{
-			name: "No tried masquerades",
-			masquerades: sortedMasquerades{
-				domain1,
-				domain2,
-			},
-			triedMasquerades: map[MasqueradeInterface]bool{},
-			expected:         domain1,
-		},
-		{
-			name: "Some tried masquerades",
-			masquerades: sortedMasquerades{
-				domain1,
-				domain2,
-			},
-			triedMasquerades: map[MasqueradeInterface]bool{
-				domain1: true,
-			},
-			expected: domain2,
-		},
-		{
-			name: "All masquerades tried",
-			masquerades: sortedMasquerades{
-				domain1,
-				domain2,
-			},
-			triedMasquerades: map[MasqueradeInterface]bool{
-				domain1: true,
-				domain2: true,
-			},
-			expected: nil,
-		},
-		{
-			name:             "Empty masquerades list",
-			masquerades:      sortedMasquerades{},
-			triedMasquerades: map[MasqueradeInterface]bool{},
-			expected:         nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := &fronted{}
-			masquerades := tt.masquerades.sortedCopy()
-			result, _ := f.masqueradeToTry(masquerades, tt.triedMasquerades)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestDialAll(t *testing.T) {
-	tests := []struct {
-		name                string
-		masquerades         []*mockMasquerade
-		expectedSuccessful  bool
-		expectedMasquerades int
-	}{
-		{
-			name: "All successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
-			},
-			expectedSuccessful: true,
-		},
-		{
-			name: "Some successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
-			},
-			expectedSuccessful: true,
-		},
-		{
-			name: "None successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 1*time.Millisecond, false),
-				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 1*time.Millisecond, false),
-				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
-			},
-			expectedSuccessful: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := &fronted{}
-			d.providers = make(map[string]*Provider)
-			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
-			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
-			for i, m := range tt.masquerades {
-				d.masquerades[i] = m
-			}
-
-			ctx := context.Background()
-			conn, m, masqueradeGood, err := d.dialAll(ctx)
-
-			if tt.expectedSuccessful {
-				assert.NoError(t, err)
-				assert.NotNil(t, conn)
-				assert.NotNil(t, m)
-				assert.NotNil(t, masqueradeGood)
-			} else {
-				assert.Error(t, err)
-				assert.Nil(t, conn)
-				assert.Nil(t, m)
-				assert.Nil(t, masqueradeGood)
-			}
 		})
 	}
 }

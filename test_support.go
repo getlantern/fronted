@@ -23,13 +23,13 @@ func ConfigureForTest(t *testing.T) {
 func ConfigureCachingForTest(t *testing.T, cacheFile string) {
 	certs := trustedCACerts(t)
 	p := testProviders()
-	Configure(certs, p, testProviderID, cacheFile)
+	NewFronter(certs, p, testProviderID, cacheFile)
 }
 
 func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) {
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	Configure(certs, p, testProviderID, "")
+	NewFronter(certs, p, testProviderID, "")
 }
 
 func trustedCACerts(t *testing.T) *x509.CertPool {
