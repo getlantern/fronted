@@ -13,16 +13,16 @@ import (
 )
 
 // Create an interface for the fronting context
-type Fronting interface {
+type Fronted interface {
 	UpdateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string)
-	NewRoundTripper(timeout time.Duration) (http.RoundTripper, bool)
+	NewRoundTripper(timeout time.Duration) (http.RoundTripper, error)
 	Close()
 }
 
 var defaultContext = newFrontingContext("default")
 
 // Make sure that the default context is a Fronting
-var _ Fronting = defaultContext
+var _ Fronted = defaultContext
 
 // Configure sets the masquerades to use, the trusted root CAs, and the
 // cache file for caching masquerades to set up direct domain fronting
@@ -30,7 +30,7 @@ var _ Fronting = defaultContext
 //
 // defaultProviderID is used when a masquerade without a provider is
 // encountered (eg in a cache file)
-func NewFronter(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) (Fronting, error) {
+func NewFronted(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string) (Fronted, error) {
 	if err := defaultContext.configure(pool, providers, defaultProviderID, cacheFile); err != nil {
 		return nil, log.Errorf("Error configuring fronting %s context: %s!!", defaultContext.name, err)
 	}
@@ -94,18 +94,17 @@ func (fctx *frontingContext) configureWithHello(pool *x509.CertPool, providers m
 // NewFronted creates a new http.RoundTripper that does direct domain fronting.
 // If the context isn't configured within the given timeout, this method
 // returns nil, false.
-func (fctx *frontingContext) NewRoundTripper(timeout time.Duration) (http.RoundTripper, bool) {
+func (fctx *frontingContext) NewRoundTripper(timeout time.Duration) (http.RoundTripper, error) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	instance, err := fctx.instance.Get(ctx)
 	if err != nil {
-		log.Errorf("No DirectHttpClient available within %v for context %s", timeout, fctx.name)
-		return nil, false
+		return nil, log.Errorf("No DirectHttpClient available within %v for context %s with error %v", timeout, fctx.name, err)
 	} else {
 		log.Debugf("DirectHttpClient available for context %s after %v with duration %v", fctx.name, time.Since(start), timeout)
 	}
-	return instance.(http.RoundTripper), true
+	return instance.(http.RoundTripper), nil
 }
 
 // Close closes any existing cache file in the default contexxt.

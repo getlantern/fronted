@@ -60,7 +60,7 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 	testContext.configure(certs, p, "akamai", cacheFile)
 
 	transport, ok := testContext.NewRoundTripper(30 * time.Second)
-	require.True(t, ok)
+	require.NoError(t, ok)
 	client := &http.Client{
 		Transport: transport,
 	}
@@ -89,7 +89,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	testContext.configure(certs, p, testProviderID, cacheFile)
 
 	transport, ok := testContext.NewRoundTripper(30 * time.Second)
-	require.True(t, ok)
+	require.NoError(t, ok)
 
 	client := &http.Client{
 		Transport: transport,
@@ -98,7 +98,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
 	transport, ok = testContext.NewRoundTripper(30 * time.Second)
-	require.True(t, ok)
+	require.NoError(t, ok)
 	client = &http.Client{
 		Transport: transport,
 	}
@@ -244,7 +244,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	testContext.configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
 	rt, ok := testContext.NewRoundTripper(30 * time.Second)
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
+	if !assert.NoError(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
 	client := &http.Client{Transport: rt}
@@ -356,7 +356,7 @@ func TestHostAliasesMulti(t *testing.T) {
 	testContext := newFrontingContext("TestHostAliasesMulti")
 	testContext.configure(certs, providers, "cloudsack", "")
 	rt, ok := testContext.NewRoundTripper(30 * time.Second)
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
+	if !assert.NoError(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
 	client := &http.Client{Transport: rt}
@@ -484,7 +484,7 @@ func TestPassthrough(t *testing.T) {
 	testContext.configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
 
 	rt, ok := testContext.NewRoundTripper(30 * time.Second)
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
+	if !assert.NoError(t, ok, "failed to obtain direct roundtripper") {
 		return
 	}
 	client := &http.Client{Transport: rt}
@@ -637,7 +637,7 @@ func TestCustomValidators(t *testing.T) {
 			testContext := newFrontingContext(test.name)
 			setup(testContext, test.validator)
 			direct, ok := testContext.NewRoundTripper(30 * time.Second)
-			require.True(t, ok)
+			require.NoError(t, ok)
 			client := &http.Client{
 				Transport: direct,
 			}
