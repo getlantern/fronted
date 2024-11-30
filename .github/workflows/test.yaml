@@ -16,16 +16,15 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: "go.mod"
-    - name: Set up gotestfmt
-      uses: gotesttools/gotestfmt-action@v2
-      with:
-        # Optional: pass GITHUB_TOKEN to avoid rate limiting.
-        token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install go go-ctrf-json-reporter
+      run: go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@latest
     - name: Run tests
       run: |
         set -euo pipefail
-        go test -json -race -failfast -tags="headless" -coverprofile=profile.cov -v ./... 2>&1 | tee /tmp/gotest.log | gotestfmt -nofail
-
+        go test -json -race -failfast -tags="headless" -coverprofile=profile.cov ./... | go-ctrf-json-reporter -output ctrf-report.json
+    - name: Run CTRF annotations
+      run: npx github-actions-ctrf ctrf-report.json
+      if: always()
       # Upload the original go test log as an artifact for later review.
     - name: Upload test log
       uses: actions/upload-artifact@v3
