@@ -21,7 +21,7 @@ jobs:
     - name: Run tests
       run: |
         set -euo pipefail
-        go test -json -race -failfast -tags="headless" -coverprofile=profile.cov ./... | go-ctrf-json-reporter -output ctrf-report.json
+        go test -json -race -tags="headless" -coverprofile=profile.cov ./... | go-ctrf-json-reporter -output ctrf-report.json
     - name: Upload test results
       uses: actions/upload-artifact@v4
       with:
