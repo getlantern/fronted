@@ -81,11 +81,10 @@ func (fctx *frontingContext) configureWithHello(pool *x509.CertPool, providers m
 	}
 
 	var err error
-	fctx.fronted, err = newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID, func(f *fronted) {
+	if fctx.fronted, err = newFronted(pool, providers, defaultProviderID, cacheFile, clientHelloID, func(f *fronted) {
 		log.Debug("Setting fronted instance")
 		fctx.instance.Set(f)
-	}, fctx.connectingFronts)
-	if err != nil {
+	}, fctx.connectingFronts); err != nil {
 		return err
 	}
 	return nil
