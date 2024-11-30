@@ -257,7 +257,7 @@ func (f *fronted) vetMasquerade(m MasqueradeInterface) (bool, time.Duration) {
 		return false, time.Since(start)
 	}
 
-	log.Debugf("Successfully vetted one masquerade %v", m)
+	log.Debugf("Successfully vetted one masquerade %v", m.getIpAddress())
 	return true, time.Since(start)
 }
 
@@ -393,6 +393,7 @@ func (f *fronted) dialMasquerade(m MasqueradeInterface) (net.Conn, func(bool) bo
 	// We do the full TLS connection here because in practice the domains at a given IP
 	// address can change frequently on CDNs, so the certificate may not match what
 	// we expect.
+	start := time.Now()
 	conn, retriable, err := f.doDial(m)
 	masqueradeGood := func(good bool) bool {
 		if good {
@@ -404,7 +405,7 @@ func (f *fronted) dialMasquerade(m MasqueradeInterface) (net.Conn, func(bool) bo
 		return good
 	}
 	if err == nil {
-		log.Debugf("Returning connection for masquerade: %v", m)
+		log.Debugf("Returning connection for masquerade %v in %v", m.getIpAddress(), time.Since(start))
 		return conn, masqueradeGood, err
 	} else if !retriable {
 		log.Debugf("Dropping masquerade: non retryable error: %v", err)
@@ -423,7 +424,6 @@ func (f *fronted) doDial(m MasqueradeInterface) (net.Conn, bool, error) {
 	var conn net.Conn
 	var err error
 	retriable := false
-	start := time.Now()
 	conn, err = m.dial(f.certPool, f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
@@ -440,8 +440,6 @@ func (f *fronted) doDial(m MasqueradeInterface) (net.Conn, bool, error) {
 			log.Debugf("Unexpected error dialing, keeping masquerade: %v", err)
 			retriable = true
 		}
-	} else {
-		log.Debugf("Got successful connection to: %+v in %v", m, time.Since(start))
 	}
 	return conn, retriable, err
 }
