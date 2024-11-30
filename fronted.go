@@ -101,7 +101,6 @@ func copyProviders(providers map[string]*Provider) map[string]*Provider {
 	providersCopy := make(map[string]*Provider, len(providers))
 	for key, p := range providers {
 		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
-		log.Debugf("Domain fronting provider is %v", providersCopy[key])
 	}
 	return providersCopy
 }
@@ -134,6 +133,7 @@ func loadMasquerades(initial map[string]*Provider, size int) sortedMasquerades {
 func (f *fronted) updateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
+	log.Debug("Updating fronted configuration")
 	providersCopy := copyProviders(providers)
 	f.frontedMu.Lock()
 	defer f.frontedMu.Unlock()
