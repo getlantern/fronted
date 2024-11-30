@@ -13,11 +13,27 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version-file: "go.mod"
-    - name: Run unit tests
-      run: go test -failfast -coverprofile=profile.cov
+    - name: Set up gotestfmt
+      uses: gotesttools/gotestfmt-action@v2
+      with:
+        # Optional: pass GITHUB_TOKEN to avoid rate limiting.
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Run tests
+      run: |
+        set -euo pipefail
+        go test -json -race -failfast -tags="headless" -coverprofile=profile.cov -v ./... 2>&1 | tee /tmp/gotest.log | gotestfmt -nofail
+
+      # Upload the original go test log as an artifact for later review.
+    - name: Upload test log
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-log
+        path: /tmp/gotest.log
+        if-no-files-found: error
     - name: Install goveralls
       run: go install github.com/mattn/goveralls@latest
     - name: Send coverage

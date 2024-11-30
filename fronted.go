@@ -61,8 +61,10 @@ type fronted struct {
 
 func newFronted(pool *x509.CertPool, providers map[string]*Provider,
 	defaultProviderID, cacheFile string, clientHelloID tls.ClientHelloID,
-	listener func(f *fronted),
-	workingFronts workingFronts) (*fronted, error) {
+	listener func(f *fronted), workingFronts workingFronts) (*fronted, error) {
+	if workingFronts == nil {
+		return nil, fmt.Errorf("workingFronts must not be nil")
+	}
 	size := 0
 	for _, p := range providers {
 		size += len(p.Masquerades)
