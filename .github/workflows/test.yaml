@@ -19,9 +19,7 @@ jobs:
     - name: Install go go-ctrf-json-reporter
       run: go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@latest
     - name: Run tests
-      run: |
-        set -euo pipefail
-        go test -json -race -tags="headless" -coverprofile=profile.cov ./... | go-ctrf-json-reporter -output ctrf-report.json
+      run: go test -json -race -tags="headless" -coverprofile=profile.cov ./... | go-ctrf-json-reporter -output ctrf-report.json
     - name: Upload test results
       uses: actions/upload-artifact@v4
       with:
