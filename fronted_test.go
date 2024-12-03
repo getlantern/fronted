@@ -841,25 +841,26 @@ func TestFindWorkingMasquerades(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &fronted{
+			f := &fronted{
 				workingFronts: newConnectingFronts(10),
+				stopCh:        make(chan interface{}, 10),
 			}
-			d.providers = make(map[string]*Provider)
-			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
-			d.fronts = make(sortedFronts, len(tt.masquerades))
+			f.providers = make(map[string]*Provider)
+			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
+			f.fronts = make(sortedFronts, len(tt.masquerades))
 			for i, m := range tt.masquerades {
-				d.fronts[i] = m
+				f.fronts[i] = m
 			}
 
-			d.vetBatch(0, 10)
+			f.vetBatch(0, 10)
 
 			tries := 0
-			for d.workingFronts.size() < tt.expectedSuccessful && tries < 100 {
+			for f.workingFronts.size() < tt.expectedSuccessful && tries < 100 {
 				time.Sleep(30 * time.Millisecond)
 				tries++
 			}
 
-			assert.GreaterOrEqual(t, d.workingFronts.size(), tt.expectedSuccessful)
+			assert.GreaterOrEqual(t, f.workingFronts.size(), tt.expectedSuccessful)
 		})
 	}
 }

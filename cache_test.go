@@ -26,6 +26,7 @@ func TestCaching(t *testing.T) {
 		cloudsackID:    NewProvider(nil, "", nil, nil, nil, nil, nil),
 	}
 
+	log.Debug("Creating fronted")
 	makeFronted := func() *fronted {
 		f := &fronted{
 			fronts:              make(sortedFronts, 0, 1000),
@@ -36,6 +37,7 @@ func TestCaching(t *testing.T) {
 			cacheClosed:         make(chan interface{}),
 			providers:           providers,
 			defaultProviderID:   cloudsackID,
+			stopCh:              make(chan interface{}, 10),
 		}
 		go f.maintainCache(cacheFile)
 		return f
@@ -47,9 +49,12 @@ func TestCaching(t *testing.T) {
 	md := &front{Masquerade: Masquerade{Domain: "d", IpAddress: "4"}, LastSucceeded: now, ProviderID: "sadcloud"} // skipped
 
 	f := makeFronted()
+
+	log.Debug("Adding fronts")
 	f.fronts = append(f.fronts, mb, mc, md)
 
 	readCached := func() []*front {
+		log.Debug("Reading cached fronts")
 		var result []*front
 		b, err := os.ReadFile(cacheFile)
 		require.NoError(t, err, "Unable to read cache file")
@@ -60,14 +65,16 @@ func TestCaching(t *testing.T) {
 
 	// Save the cache
 	f.markCacheDirty()
+
 	time.Sleep(f.cacheSaveInterval * 2)
 	f.Close()
 
 	time.Sleep(50 * time.Millisecond)
 
+	log.Debug("Reopening fronted")
 	// Reopen cache file and make sure right data was in there
 	f = makeFronted()
-	f.prepopulateMasquerades(cacheFile)
+	f.prepopulateFronts(cacheFile)
 	masquerades := readCached()
 	require.Len(t, masquerades, 3, "Wrong number of masquerades read")
 	for i, expected := range []*front{mb, mc, md} {

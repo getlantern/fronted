@@ -89,7 +89,7 @@ func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProvider
 		providers:           make(map[string]*Provider),
 		clientHelloID:       clientHello,
 		workingFronts:       newConnectingFronts(4000),
-		stopCh:              make(chan interface{}),
+		stopCh:              make(chan interface{}, 10),
 		defaultProviderID:   defaultProviderID,
 	}
 
