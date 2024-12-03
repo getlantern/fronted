@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/getlantern/keyman"
+	tls "github.com/refraction-networking/utls"
 )
 
 var (
@@ -23,13 +24,13 @@ func ConfigureForTest(t *testing.T) {
 func ConfigureCachingForTest(t *testing.T, cacheFile string) {
 	certs := trustedCACerts(t)
 	p := testProviders()
-	NewFronted(certs, p, testProviderID, cacheFile)
+	NewFronted(certs, p, testProviderID, cacheFile, tls.HelloChrome_100)
 }
 
 func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) {
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	NewFronted(certs, p, testProviderID, "")
+	NewFronted(certs, p, testProviderID, "", tls.HelloChrome_100)
 }
 
 func trustedCACerts(t *testing.T) *x509.CertPool {

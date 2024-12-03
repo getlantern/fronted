@@ -37,8 +37,6 @@ github.com/getlantern/errors v0.0.0-20190325191628-abdb3e3e36f7/go.mod h1:l+xpFB
 github.com/getlantern/errors v1.0.1/go.mod h1:l+xpFBrCtDLpK9qNjxs+cHU6+BAdlBaxHqikB6Lku3A=
 github.com/getlantern/errors v1.0.3 h1:Ne4Ycj7NI1BtSyAfVeAT/DNoxz7/S2BUc3L2Ht1YSHE=
 github.com/getlantern/errors v1.0.3/go.mod h1:m8C7H1qmouvsGpwQqk/6NUpIVMpfzUPn608aBZDYV04=
-github.com/getlantern/eventual/v2 v2.0.2 h1:7b3N2oQBVqSHwm/8u7C8b6W+OkkjgZSmwUc1AdIkrHc=
-github.com/getlantern/eventual/v2 v2.0.2/go.mod h1:o1VZHRk8UArBra+pwPSi23WrahBG4qgg4/ew6Mmlq84=
 github.com/getlantern/fdcount v0.0.0-20190912142506-f89afd7367c4 h1:JdD4XSaT6/j6InM7MT1E4WRvzR8gurxfq53A3ML3B/Q=
 github.com/getlantern/fdcount v0.0.0-20190912142506-f89afd7367c4/go.mod h1:XZwE+iIlAgr64OFbXKFNCllBwV4wEipPx8Hlo2gZdbM=
 github.com/getlantern/filepersist v0.0.0-20160317154340-c5f0cd24e799 h1:FhkPUYCQYmoxS02r2GRrIV7dahUIncRl36xzs3/mnjA=

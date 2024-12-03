@@ -27,7 +27,7 @@ func (d *fronted) prepopulateMasquerades(cacheFile string) {
 	}
 
 	log.Debugf("Attempting to prepopulate masquerades from cache file: %v", cacheFile)
-	var cachedMasquerades []*masquerade
+	var cachedMasquerades []*front
 	if err := json.Unmarshal(bytes, &cachedMasquerades); err != nil {
 		log.Errorf("Error reading cached masquerades: %v", err)
 		return
@@ -37,7 +37,7 @@ func (d *fronted) prepopulateMasquerades(cacheFile string) {
 	now := time.Now()
 
 	// update last succeeded status of masquerades based on cached values
-	for _, m := range d.masquerades {
+	for _, m := range d.fronts {
 		for _, cm := range cachedMasquerades {
 			sameMasquerade := cm.ProviderID == m.getProviderID() && cm.Domain == m.getDomain() && cm.IpAddress == m.getIpAddress()
 			cachedValueFresh := now.Sub(m.lastSucceeded()) < d.maxAllowedCachedAge
@@ -75,7 +75,7 @@ func (d *fronted) maintainCache(cacheFile string) {
 
 func (d *fronted) updateCache(cacheFile string) {
 	log.Debugf("Updating cache at %v", cacheFile)
-	cache := d.masquerades.sortedCopy()
+	cache := d.fronts.sortedCopy()
 	sizeToSave := len(cache)
 	if d.maxCacheSize < sizeToSave {
 		sizeToSave = d.maxCacheSize
@@ -101,8 +101,9 @@ func (d *fronted) updateCache(cacheFile string) {
 	}
 }
 
-func (d *fronted) closeCache() {
+func (d *fronted) Close() {
 	d.closeCacheOnce.Do(func() {
 		close(d.cacheClosed)
 	})
+	d.stopCh <- nil
 }
