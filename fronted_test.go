@@ -29,10 +29,13 @@ func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
 	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
+
+	log.Debug("Testing direct domain fronting without SNI config")
 	doTestDomainFronting(t, cacheFile, 10)
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile but a corrupted version
 	corruptMasquerades(cacheFile)
+	log.Debug("Testing direct domain fronting without SNI config again")
 	doTestDomainFronting(t, cacheFile, 10)
 }
 
@@ -842,8 +845,8 @@ func TestFindWorkingMasquerades(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fronted{
-				workingFronts: newConnectingFronts(10),
-				stopCh:        make(chan interface{}, 10),
+				connectingFronts: newConnectingFronts(10),
+				stopCh:           make(chan interface{}, 10),
 			}
 			f.providers = make(map[string]*Provider)
 			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
@@ -855,12 +858,12 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			f.vetBatch(0, 10)
 
 			tries := 0
-			for f.workingFronts.size() < tt.expectedSuccessful && tries < 100 {
+			for f.connectingFronts.size() < tt.expectedSuccessful && tries < 100 {
 				time.Sleep(30 * time.Millisecond)
 				tries++
 			}
 
-			assert.GreaterOrEqual(t, f.workingFronts.size(), tt.expectedSuccessful)
+			assert.GreaterOrEqual(t, f.connectingFronts.size(), tt.expectedSuccessful)
 		})
 	}
 }

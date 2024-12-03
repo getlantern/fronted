@@ -7,19 +7,19 @@ import (
 func TestConnectingFrontsSize(t *testing.T) {
 	tests := []struct {
 		name     string
-		setup    func() *connectingFronts
+		setup    func() *connecting
 		expected int
 	}{
 		{
 			name: "empty channel",
-			setup: func() *connectingFronts {
+			setup: func() *connecting {
 				return newConnectingFronts(10)
 			},
 			expected: 0,
 		},
 		{
 			name: "non-empty channel",
-			setup: func() *connectingFronts {
+			setup: func() *connecting {
 				cf := newConnectingFronts(10)
 				cf.onConnected(&mockFront{})
 				return cf

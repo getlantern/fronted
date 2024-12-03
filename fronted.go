@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -46,7 +47,7 @@ type fronted struct {
 	defaultProviderID   string
 	providers           map[string]*Provider
 	clientHelloID       tls.ClientHelloID
-	workingFronts       workingFronts
+	connectingFronts    connectingFronts
 	providersMu         sync.RWMutex
 	frontsMu            sync.RWMutex
 	frontedMu           sync.RWMutex
@@ -65,12 +66,9 @@ type Fronted interface {
 	Close()
 }
 
-// NewFronted sets the domain fronts to use, the trusted root CAs, the fronting providers
-// (such as Akamai, Cloudfront, etc), and the cache file for caching fronts to set up
-// domain fronting.
-//
-// defaultProviderID is used when a front without a provider is
-// encountered (eg in a cache file)
+// NewFronted creates a new Fronted instance with the given cache file, clientHelloID, and defaultProviderID.
+// At this point it does not have the actual IPs, domains, etc of the fronts to try.
+// defaultProviderID is used when a front without a provider is encountered (eg in a cache file)
 func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProviderID string) (Fronted, error) {
 	log.Debug("Creating new fronted")
 	// Log method elapsed time
@@ -88,7 +86,7 @@ func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProvider
 		cacheClosed:         make(chan interface{}),
 		providers:           make(map[string]*Provider),
 		clientHelloID:       clientHello,
-		workingFronts:       newConnectingFronts(4000),
+		connectingFronts:    newConnectingFronts(4000),
 		stopCh:              make(chan interface{}, 10),
 		defaultProviderID:   defaultProviderID,
 	}
@@ -143,6 +141,9 @@ func loadFronts(providers map[string]*Provider) sortedFronts {
 	return fronts
 }
 
+// UpdateConfig sets the domain fronts to use, the trusted root CAs, the fronting providers
+// (such as Akamai, Cloudfront, etc), and the cache file for caching fronts to set up
+// domain fronting.
 func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
@@ -159,6 +160,7 @@ func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provid
 
 	f.certPool = pool
 
+	// The goroutine for finding working fronts runs forever, so only start it once.
 	f.crawlOnce.Do(func() {
 		go f.findWorkingFronts()
 	})
@@ -221,7 +223,7 @@ func (f *fronted) findWorkingFronts() {
 		// This is important, for example, when the user goes offline and all fronts start failing.
 		// We want to just keep trying in that case so that we find working fronts as soon as they
 		// come back online.
-		if f.workingFronts.size() < 4 {
+		if f.connectingFronts.size() < 4 {
 			f.vetBatch(i, batchSize)
 			i = index(i, batchSize, f.frontSize())
 		} else {
@@ -260,7 +262,7 @@ func (f *fronted) vetBatch(start, batchSize int) {
 			defer wg.Done()
 			working := f.vetFront(m)
 			if working {
-				f.workingFronts.onConnected(m)
+				f.connectingFronts.onConnected(m)
 			} else {
 				m.markFailed()
 			}
@@ -308,6 +310,12 @@ func (f *fronted) RoundTrip(req *http.Request) (*http.Response, error) {
 func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, error) {
 	op := ops.Begin("fronted_roundtrip")
 	defer op.End()
+	// If the request has a context, use it. Otherwise, create a new one that has a timeout.
+	if req.Context() == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
 
 	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
 	op.Set("is_idempotent", isIdempotent)
@@ -345,7 +353,7 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 			log.Debugf("Retrying domain-fronted request, pass %d", i)
 		}
 
-		m, err := f.workingFronts.connectingFront(req.Context())
+		m, err := f.connectingFronts.connectingFront(req.Context())
 		if err != nil {
 			// For some reason we have no working fronts. Sleep for a bit and try again.
 			time.Sleep(1 * time.Second)
