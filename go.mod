@@ -5,7 +5,6 @@ go 1.22.6
 toolchain go1.23.3
 
 require (
-	github.com/getlantern/eventual/v2 v2.0.2
 	github.com/getlantern/golog v0.0.0-20230503153817-8e72de7e0a65
 	github.com/getlantern/keyman v0.0.0-20200819205636-76fef27c39f1
 	github.com/getlantern/netx v0.0.0-20240814210628-0984f52e2d18
