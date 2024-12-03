@@ -51,6 +51,7 @@ type fronted struct {
 	frontsMu            sync.RWMutex
 	frontedMu           sync.RWMutex
 	stopCh              chan interface{}
+	crawlOnce           sync.Once
 }
 
 // Interface for sending HTTP traffic over domain fronting.
@@ -58,7 +59,7 @@ type Fronted interface {
 	http.RoundTripper
 
 	// UpdateConfig updates the set of domain fronts to try.
-	UpdateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string)
+	UpdateConfig(pool *x509.CertPool, providers map[string]*Provider)
 
 	// Close closes any resources, such as goroutines that are testing fronts.
 	Close()
@@ -70,40 +71,31 @@ type Fronted interface {
 //
 // defaultProviderID is used when a front without a provider is
 // encountered (eg in a cache file)
-func NewFronted(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string, cacheFile string,
-	clientHello tls.ClientHelloID) (Fronted, error) {
+func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProviderID string) (Fronted, error) {
 	log.Debug("Creating new fronted")
 	// Log method elapsed time
 	defer func(start time.Time) {
 		log.Debugf("Creating a new fronted took %v", time.Since(start))
 	}(time.Now())
 
-	if len(providers) == 0 {
-		return nil, log.Errorf("No providers configured")
-	}
-
-	providersCopy := copyProviders(providers)
-	fronts := loadFronts(providersCopy)
-
 	f := &fronted{
-		certPool:            pool,
-		fronts:              fronts,
+		certPool:            nil,
+		fronts:              make(sortedFronts, 0),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
 		cacheDirty:          make(chan interface{}, 1),
 		cacheClosed:         make(chan interface{}),
-		defaultProviderID:   defaultProviderID,
-		providers:           providersCopy,
+		providers:           make(map[string]*Provider),
 		clientHelloID:       clientHello,
-		workingFronts:       newConnectingFronts(len(fronts)),
+		workingFronts:       newConnectingFronts(4000),
 		stopCh:              make(chan interface{}),
+		defaultProviderID:   defaultProviderID,
 	}
 
 	if cacheFile != "" {
 		f.initCaching(cacheFile)
 	}
-	go f.findWorkingFronts()
 
 	return f, nil
 }
@@ -151,17 +143,25 @@ func loadFronts(providers map[string]*Provider) sortedFronts {
 	return fronts
 }
 
-func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider, defaultProviderID string) {
+func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
 	log.Debug("Updating fronted configuration")
+	if len(providers) == 0 {
+		log.Errorf("No providers configured")
+		return
+	}
 	providersCopy := copyProviders(providers)
 	f.frontedMu.Lock()
 	defer f.frontedMu.Unlock()
 	f.addProviders(providersCopy)
 	f.addFronts(loadFronts(providersCopy))
-	f.defaultProviderID = defaultProviderID
+
 	f.certPool = pool
+
+	f.crawlOnce.Do(func() {
+		go f.findWorkingFronts()
+	})
 }
 
 func (f *fronted) addProviders(providers map[string]*Provider) {
@@ -457,7 +457,7 @@ func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
 	var conn net.Conn
 	var err error
 	retriable := false
-	conn, err = m.dial(f.certPool, f.clientHelloID)
+	conn, err = m.dial(f.getCertPool(), f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
 			op.FailIf(err)
@@ -475,6 +475,12 @@ func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
 		}
 	}
 	return conn, retriable, err
+}
+
+func (f *fronted) getCertPool() *x509.CertPool {
+	f.frontedMu.RLock()
+	defer f.frontedMu.RUnlock()
+	return f.certPool
 }
 
 func isNetworkUnreachable(err error) bool {

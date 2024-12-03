@@ -24,13 +24,21 @@ func ConfigureForTest(t *testing.T) {
 func ConfigureCachingForTest(t *testing.T, cacheFile string) {
 	certs := trustedCACerts(t)
 	p := testProviders()
-	NewFronted(certs, p, testProviderID, cacheFile, tls.HelloChrome_100)
+	f, err := NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
+	if err != nil {
+		t.Fatalf("Unable to create fronted: %v", err)
+	}
+	f.UpdateConfig(certs, p)
 }
 
 func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) {
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	NewFronted(certs, p, testProviderID, "", tls.HelloChrome_100)
+	f, err := NewFronted("", tls.HelloChrome_100, testProviderID)
+	if err != nil {
+		t.Fatalf("Unable to create fronted: %v", err)
+	}
+	f.UpdateConfig(certs, p)
 }
 
 func trustedCACerts(t *testing.T) *x509.CertPool {
