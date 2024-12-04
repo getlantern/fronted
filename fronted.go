@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,7 +37,7 @@ var (
 // fronted identifies working IP address/domain pairings for domain fronting and is
 // an implementation of http.RoundTripper for the convenience of callers.
 type fronted struct {
-	certPool            *x509.CertPool
+	certPool            atomic.Value
 	fronts              sortedFronts
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
@@ -77,7 +78,7 @@ func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProvider
 	}(time.Now())
 
 	f := &fronted{
-		certPool:            nil,
+		certPool:            atomic.Value{},
 		fronts:              make(sortedFronts, 0),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
@@ -96,6 +97,31 @@ func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProvider
 	}
 
 	return f, nil
+}
+
+// UpdateConfig sets the domain fronts to use, the trusted root CAs, the fronting providers
+// (such as Akamai, Cloudfront, etc), and the cache file for caching fronts to set up
+// domain fronting.
+func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider) {
+	// Make copies just to avoid any concurrency issues with access that may be happening on the
+	// caller side.
+	log.Debug("Updating fronted configuration")
+	if len(providers) == 0 {
+		log.Errorf("No providers configured")
+		return
+	}
+	providersCopy := copyProviders(providers)
+	f.frontedMu.Lock()
+	defer f.frontedMu.Unlock()
+	f.addProviders(providersCopy)
+	f.addFronts(loadFronts(providersCopy))
+
+	f.certPool.Store(pool)
+
+	// The goroutine for finding working fronts runs forever, so only start it once.
+	f.crawlOnce.Do(func() {
+		go f.findWorkingFronts()
+	})
 }
 
 func copyProviders(providers map[string]*Provider) map[string]*Provider {
@@ -141,31 +167,6 @@ func loadFronts(providers map[string]*Provider) sortedFronts {
 	return fronts
 }
 
-// UpdateConfig sets the domain fronts to use, the trusted root CAs, the fronting providers
-// (such as Akamai, Cloudfront, etc), and the cache file for caching fronts to set up
-// domain fronting.
-func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider) {
-	// Make copies just to avoid any concurrency issues with access that may be happening on the
-	// caller side.
-	log.Debug("Updating fronted configuration")
-	if len(providers) == 0 {
-		log.Errorf("No providers configured")
-		return
-	}
-	providersCopy := copyProviders(providers)
-	f.frontedMu.Lock()
-	defer f.frontedMu.Unlock()
-	f.addProviders(providersCopy)
-	f.addFronts(loadFronts(providersCopy))
-
-	f.certPool = pool
-
-	// The goroutine for finding working fronts runs forever, so only start it once.
-	f.crawlOnce.Do(func() {
-		go f.findWorkingFronts()
-	})
-}
-
 func (f *fronted) addProviders(providers map[string]*Provider) {
 	// Add new providers to the existing providers map, overwriting any existing ones.
 	f.providersMu.Lock()
@@ -194,10 +195,11 @@ func (f *fronted) providerFor(m Front) *Provider {
 // This is used in genconfig.
 func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	d := &fronted{
-		certPool:            pool,
+		certPool:            atomic.Value{},
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 	}
+	d.certPool.Store(pool)
 	masq := &front{Masquerade: *m}
 	conn, _, err := d.doDial(masq)
 	if err != nil {
@@ -465,7 +467,7 @@ func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
 	var conn net.Conn
 	var err error
 	retriable := false
-	conn, err = m.dial(f.getCertPool(), f.clientHelloID)
+	conn, err = m.dial(f.certPool.Load().(*x509.CertPool), f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
 			op.FailIf(err)
@@ -483,12 +485,6 @@ func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
 		}
 	}
 	return conn, retriable, err
-}
-
-func (f *fronted) getCertPool() *x509.CertPool {
-	f.frontedMu.RLock()
-	defer f.frontedMu.RUnlock()
-	return f.certPool
 }
 
 func isNetworkUnreachable(err error) bool {
