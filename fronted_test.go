@@ -799,33 +799,33 @@ func TestFindWorkingMasquerades(t *testing.T) {
 		{
 			name: "All successful",
 			masquerades: []*mockFront{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain2.com", "2.2.2.2", 0, true),
+				newMockFront("domain3.com", "3.3.3.3", 0, true),
+				newMockFront("domain4.com", "4.4.4.4", 0, true),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
 			},
 			expectedSuccessful: 4,
 		},
 		{
 			name: "Some successful",
 			masquerades: []*mockFront{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, false),
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain2.com", "2.2.2.2", 0, false),
+				newMockFront("domain3.com", "3.3.3.3", 0, true),
+				newMockFront("domain4.com", "4.4.4.4", 0, false),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
 			},
 			expectedSuccessful: 2,
 		},
 		{
 			name: "None successful",
 			masquerades: []*mockFront{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, false),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, false),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, false),
+				newMockFront("domain1.com", "1.1.1.1", 0, false),
+				newMockFront("domain2.com", "2.2.2.2", 0, false),
+				newMockFront("domain3.com", "3.3.3.3", 0, false),
+				newMockFront("domain4.com", "4.4.4.4", 0, false),
 			},
 			expectedSuccessful: 0,
 		},
@@ -834,7 +834,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			masquerades: func() []*mockFront {
 				var masquerades []*mockFront
 				for i := 0; i < 50; i++ {
-					masquerades = append(masquerades, newMockMasquerade(fmt.Sprintf("domain%d.com", i), fmt.Sprintf("1.1.1.%d", i), 0, i%2 == 0))
+					masquerades = append(masquerades, newMockFront(fmt.Sprintf("domain%d.com", i), fmt.Sprintf("1.1.1.%d", i), 0, i%2 == 0))
 				}
 				return masquerades
 			}(),
@@ -855,7 +855,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				f.fronts[i] = m
 			}
 
-			f.vetBatch(0, 10)
+			f.tryAllFronts()
 
 			tries := 0
 			for f.connectingFronts.size() < tt.expectedSuccessful && tries < 100 {
@@ -900,37 +900,15 @@ func TestLoadFronts(t *testing.T) {
 	}
 }
 
-func TestIndex(t *testing.T) {
-	tests := []struct {
-		i, batchSize, size int
-		expected           int
-	}{
-		{i: 0, batchSize: 10, size: 100, expected: 10},
-		{i: 5, batchSize: 10, size: 100, expected: 15},
-		{i: 95, batchSize: 10, size: 100, expected: 5},
-		{i: 99, batchSize: 10, size: 100, expected: 9},
-		{i: 0, batchSize: 5, size: 20, expected: 5},
-		{i: 15, batchSize: 5, size: 20, expected: 0},
-		{i: 18, batchSize: 5, size: 20, expected: 3},
-	}
-
-	for _, test := range tests {
-		t.Run(fmt.Sprintf("i=%d,batchSize=%d,size=%d", test.i, test.batchSize, test.size), func(t *testing.T) {
-			result := index(test.i, test.batchSize, test.size)
-			assert.Equal(t, test.expected, result)
-		})
-	}
+// Generate a mock of a MasqueradeInterface with a Dial method that can optionally
+// return an error after a specified number of milliseconds.
+func newMockFront(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockFront {
+	return newMockFrontWithLastSuccess(domain, ipAddress, timeout, passesCheck, time.Time{})
 }
 
 // Generate a mock of a MasqueradeInterface with a Dial method that can optionally
 // return an error after a specified number of milliseconds.
-func newMockMasquerade(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockFront {
-	return newMockMasqueradeWithLastSuccess(domain, ipAddress, timeout, passesCheck, time.Time{})
-}
-
-// Generate a mock of a MasqueradeInterface with a Dial method that can optionally
-// return an error after a specified number of milliseconds.
-func newMockMasqueradeWithLastSuccess(domain string, ipAddress string, timeout time.Duration, passesCheck bool, lastSucceededTime time.Time) *mockFront {
+func newMockFrontWithLastSuccess(domain string, ipAddress string, timeout time.Duration, passesCheck bool, lastSucceededTime time.Time) *mockFront {
 	return &mockFront{
 		Domain:            domain,
 		IpAddress:         ipAddress,

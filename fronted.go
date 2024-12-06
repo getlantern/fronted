@@ -21,6 +21,8 @@ import (
 
 	"github.com/getlantern/golog"
 	"github.com/getlantern/ops"
+
+	"github.com/alitto/pond/v2"
 )
 
 const (
@@ -210,38 +212,66 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	return masq.postCheck(conn, testURL)
 }
 
-// findWorkingFronts finds working domain fronts by vetting them in batches and in
-// parallel. Speed is of the essence here, as without working fronts, users will
+// findWorkingFronts finds working domain fronts by testing them using a worker pool. Speed
+// is of the essence here, as without working fronts, users will
 // be unable to fetch proxy configurations, particularly in the case of a first time
 // user who does not have proxies cached on disk.
 func (f *fronted) findWorkingFronts() {
-	// vet fronts in batches
-	const batchSize int = 40
-
 	// Keep looping through all fronts making sure we have working ones.
-	i := 0
 	for {
-		// Continually loop through the fronts in batches until we have 4 working ones,
-		// always looping around to the beginning if we reach the end.
+		// Continually loop through the fronts until we have 4 working ones.
 		// This is important, for example, when the user goes offline and all fronts start failing.
 		// We want to just keep trying in that case so that we find working fronts as soon as they
 		// come back online.
-		if f.connectingFronts.size() < 4 {
-			f.vetBatch(i, batchSize)
-			i = index(i, batchSize, f.frontSize())
+		if !f.hasEnoughWorkingFronts() {
+			// Note that trying all fronts takes awhile, as it only completes when we either
+			// have enough working fronts, or we've tried all of them.
+			log.Debug("findWorkingFronts::Trying all fronts")
+			f.tryAllFronts()
+			log.Debug("findWorkingFronts::Tried all fronts")
 		} else {
+			log.Debug("findWorkingFronts::Enough working fronts...sleeping")
 			select {
 			case <-f.stopCh:
-				log.Debug("Stopping parallel dialing")
+				log.Debug("findWorkingFronts::Stopping parallel dialing")
 				return
 			case <-time.After(time.Duration(rand.IntN(12000)) * time.Millisecond):
+				// Run again after a random time between 0 and 12 seconds
 			}
 		}
 	}
 }
 
-func index(i, batchSize, size int) int {
-	return (i + batchSize) % size
+func (f *fronted) tryAllFronts() {
+	// Vet fronts using a worker pool of 40 goroutines.
+	pool := pond.NewPool(40)
+
+	// Submit all fronts to the worker pool.
+	for i := 0; i < f.frontSize(); i++ {
+		i := i
+		m := f.frontAt(i)
+		pool.Submit(func() {
+			log.Debugf("Running task #%d with front %v", i, m.getIpAddress())
+			if f.hasEnoughWorkingFronts() {
+				// We have enough working fronts, so no need to continue.
+				log.Debug("Enough working fronts...ignoring task")
+				return
+			}
+			working := f.vetFront(m)
+			if working {
+				f.connectingFronts.onConnected(m)
+			} else {
+				m.markFailed()
+			}
+		})
+	}
+
+	// Stop the pool and wait for all submitted tasks to complete
+	pool.StopAndWait()
+}
+
+func (f *fronted) hasEnoughWorkingFronts() bool {
+	return f.connectingFronts.size() >= 4
 }
 
 func (f *fronted) frontSize() int {
@@ -254,24 +284,6 @@ func (f *fronted) frontAt(i int) Front {
 	f.frontsMu.Lock()
 	defer f.frontsMu.Unlock()
 	return f.fronts[i]
-}
-
-func (f *fronted) vetBatch(start, batchSize int) {
-	log.Debugf("Vetting masquerade batch %d-%d", start, start+batchSize)
-	var wg sync.WaitGroup
-	for i := start; i < start+batchSize && i < f.frontSize(); i++ {
-		wg.Add(1)
-		go func(m Front) {
-			defer wg.Done()
-			working := f.vetFront(m)
-			if working {
-				f.connectingFronts.onConnected(m)
-			} else {
-				m.markFailed()
-			}
-		}(f.frontAt(i))
-	}
-	wg.Wait()
 }
 
 func (f *fronted) vetFront(m Front) bool {
