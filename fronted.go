@@ -144,6 +144,7 @@ func loadFronts(providers map[string]*Provider) sortedFronts {
 
 	fronts := make(sortedFronts, size)
 
+	// Note that map iteration order is random, so the order of the providers is automatically randomized.
 	index := 0
 	for key, p := range providers {
 		arr := p.Masquerades

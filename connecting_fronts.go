@@ -27,7 +27,7 @@ func newConnectingFronts(size int) *connecting {
 	}
 }
 
-// AddFront adds a new front to the list of fronts.
+// onConnected adds a working front to the channel of working fronts.
 func (cf *connecting) onConnected(m Front) {
 	cf.frontsCh <- m
 }
@@ -35,6 +35,7 @@ func (cf *connecting) onConnected(m Front) {
 func (cf *connecting) connectingFront(ctx context.Context) (Front, error) {
 	for {
 		select {
+		// This is typically the context of the HTTP request. If the context is done, return an error.
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case m := <-cf.frontsCh:
