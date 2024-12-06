@@ -56,6 +56,7 @@ type fronted struct {
 	frontedMu           sync.RWMutex
 	stopCh              chan interface{}
 	crawlOnce           sync.Once
+	stopped             atomic.Bool
 }
 
 // Interface for sending HTTP traffic over domain fronting.
@@ -248,13 +249,15 @@ func (f *fronted) tryAllFronts() {
 
 	// Submit all fronts to the worker pool.
 	for i := 0; i < f.frontSize(); i++ {
-		i := i
 		m := f.frontAt(i)
 		pool.Submit(func() {
-			log.Debugf("Running task #%d with front %v", i, m.getIpAddress())
+			//log.Debugf("Running task #%d with front %v", i, m.getIpAddress())
+			if f.isStopped() {
+				return
+			}
 			if f.hasEnoughWorkingFronts() {
 				// We have enough working fronts, so no need to continue.
-				log.Debug("Enough working fronts...ignoring task")
+				//log.Debug("Enough working fronts...ignoring task")
 				return
 			}
 			working := f.vetFront(m)
@@ -626,4 +629,16 @@ func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser)
 
 func randRange(min, max int) int {
 	return rand.IntN(max-min) + min
+}
+
+func (f *fronted) Close() {
+	f.stopped.Store(true)
+	f.closeCacheOnce.Do(func() {
+		close(f.cacheClosed)
+	})
+	f.stopCh <- nil
+}
+
+func (f *fronted) isStopped() bool {
+	return f.stopped.Load()
 }

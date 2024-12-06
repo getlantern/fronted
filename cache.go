@@ -102,10 +102,3 @@ func (d *fronted) updateCache(cacheFile string) {
 		log.Debugf("Cache saved to disk")
 	}
 }
-
-func (d *fronted) Close() {
-	d.closeCacheOnce.Do(func() {
-		close(d.cacheClosed)
-	})
-	d.stopCh <- nil
-}
