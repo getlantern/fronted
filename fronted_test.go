@@ -900,6 +900,28 @@ func TestLoadFronts(t *testing.T) {
 	}
 }
 
+func TestRandRange(t *testing.T) {
+	tests := []struct {
+		min, max int
+	}{
+		{1, 10},
+		{5, 15},
+		{0, 100},
+		{-10, 10},
+		{50, 60},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("min=%d,max=%d", tt.min, tt.max), func(t *testing.T) {
+			for i := 0; i < 100; i++ {
+				result := randRange(tt.min, tt.max)
+				assert.GreaterOrEqual(t, result, tt.min)
+				assert.Less(t, result, tt.max)
+			}
+		})
+	}
+}
+
 // Generate a mock of a MasqueradeInterface with a Dial method that can optionally
 // return an error after a specified number of milliseconds.
 func newMockFront(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockFront {

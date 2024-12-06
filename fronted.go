@@ -235,7 +235,7 @@ func (f *fronted) findWorkingFronts() {
 			case <-f.stopCh:
 				log.Debug("findWorkingFronts::Stopping parallel dialing")
 				return
-			case <-time.After(time.Duration(rand.IntN(12000)) * time.Millisecond):
+			case <-time.After(time.Duration(randRange(6, 12)) * time.Second):
 				// Run again after a random time between 0 and 12 seconds
 			}
 		}
@@ -622,4 +622,8 @@ func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser)
 		}
 	}
 	return r, nil
+}
+
+func randRange(min, max int) int {
+	return rand.IntN(max-min) + min
 }
