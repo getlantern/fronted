@@ -1,7 +1,6 @@
 package fronted
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -16,11 +15,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/getlantern/eventual/v2"
 	. "github.com/getlantern/waitforserver"
 	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
@@ -32,10 +29,13 @@ func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
 	require.NoError(t, err, "Unable to create temp dir")
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
+
+	log.Debug("Testing direct domain fronting without SNI config")
 	doTestDomainFronting(t, cacheFile, 10)
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile but a corrupted version
 	corruptMasquerades(cacheFile)
+	log.Debug("Testing direct domain fronting without SNI config again")
 	doTestDomainFronting(t, cacheFile, 10)
 }
 
@@ -57,11 +57,10 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		UseArbitrarySNIs: true,
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
-	testContext := newFrontingContext("TestDirectDomainFrontingWithSNIConfig")
-	testContext.Configure(certs, p, "akamai", cacheFile)
+	transport, err := NewFronted(cacheFile, tls.HelloChrome_100, "akamai")
+	require.NoError(t, err)
+	transport.UpdateConfig(certs, p)
 
-	transport, ok := testContext.NewFronted(30 * time.Second)
-	require.True(t, ok)
 	client := &http.Client{
 		Transport: transport,
 	}
@@ -86,11 +85,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	testContext := newFrontingContext("doTestDomainFronting")
-	testContext.Configure(certs, p, testProviderID, cacheFile)
-
-	transport, ok := testContext.NewFronted(30 * time.Second)
-	require.True(t, ok)
+	transport, err := NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
+	require.NoError(t, err)
+	transport.UpdateConfig(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -98,21 +95,20 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	transport, ok = testContext.NewFronted(30 * time.Second)
-	require.True(t, ok)
+	transport, err = NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
+	require.NoError(t, err)
+	transport.UpdateConfig(certs, p)
 	client = &http.Client{
 		Transport: transport,
 	}
 	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
 
-	instance, err := testContext.instance.Get(eventual.DontWait)
-	require.NoError(t, err)
-	d := instance.(*fronted)
+	d := transport.(*fronted)
 
 	// Check the number of masquerades at the end, waiting until we get the right number
 	masqueradesAtEnd := 0
 	for i := 0; i < 1000; i++ {
-		masqueradesAtEnd = len(d.masquerades)
+		masqueradesAtEnd = len(d.fronts)
 		if masqueradesAtEnd == expectedMasqueradesAtEnd {
 			break
 		}
@@ -130,33 +126,6 @@ func TestVet(t *testing.T) {
 		}
 	}
 	t.Fatal("None of the default masquerades vetted successfully")
-}
-
-func TestLoadMasquerades(t *testing.T) {
-	providers := testProviders()
-
-	expected := make(map[Masquerade]bool)
-	for _, p := range providers {
-		for _, m := range p.Masquerades {
-			expected[*m] = true
-		}
-	}
-
-	newMasquerades := loadMasquerades(providers, len(expected))
-
-	d := &fronted{
-		masquerades: newMasquerades,
-	}
-
-	actual := make(map[Masquerade]bool)
-	count := 0
-	for _, m := range d.masquerades {
-		actual[Masquerade{Domain: m.getDomain(), IpAddress: m.getIpAddress()}] = true
-		count++
-	}
-
-	assert.Equal(t, len(DefaultCloudfrontMasquerades), count, "Unexpected number of candidates")
-	assert.Equal(t, expected, actual, "Masquerades did not load as expected")
 }
 
 func TestHostAliasesBasic(t *testing.T) {
@@ -241,13 +210,10 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	testContext := newFrontingContext("TestHostAliasesBasic")
-	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+	rt, err := NewFronted("", tls.HelloChrome_100, "cloudsack")
+	require.NoError(t, err)
+	rt.UpdateConfig(certs, map[string]*Provider{"cloudsack": p})
 
-	rt, ok := testContext.NewFronted(30 * time.Second)
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
-		return
-	}
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
 		req, err := http.NewRequest(http.MethodGet, test.url, nil)
@@ -354,12 +320,10 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	testContext := newFrontingContext("TestHostAliasesMulti")
-	testContext.Configure(certs, providers, "cloudsack", "")
-	rt, ok := testContext.NewFronted(30 * time.Second)
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
-		return
-	}
+	rt, err := NewFronted("", tls.HelloChrome_100, "cloudsack")
+	require.NoError(t, err)
+	rt.UpdateConfig(certs, providers)
+
 	client := &http.Client{Transport: rt}
 
 	providerCounts := make(map[string]int)
@@ -481,13 +445,10 @@ func TestPassthrough(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	testContext := newFrontingContext("TestPassthrough")
-	testContext.Configure(certs, map[string]*Provider{"cloudsack": p}, "cloudsack", "")
+	rt, err := NewFronted("", tls.HelloChrome_100, "cloudsack")
+	require.NoError(t, err)
+	rt.UpdateConfig(certs, map[string]*Provider{"cloudsack": p})
 
-	rt, ok := testContext.NewFronted(30 * time.Second)
-	if !assert.True(t, ok, "failed to obtain direct roundtripper") {
-		return
-	}
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
 		req, err := http.NewRequest(http.MethodGet, test.url, nil)
@@ -540,7 +501,7 @@ func TestCustomValidators(t *testing.T) {
 	sadCloudValidator := NewStatusCodeValidator(sadCloudCodes)
 	testURL := "https://abc.forbidden.com/quux"
 
-	setup := func(ctx *frontingContext, validator ResponseValidator) {
+	setup := func(validator ResponseValidator) (Fronted, error) {
 		masq := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
@@ -554,7 +515,12 @@ func TestCustomValidators(t *testing.T) {
 			"sadcloud": p,
 		}
 
-		ctx.Configure(certs, providers, "sadcloud", "")
+		f, err := NewFronted("", tls.HelloChrome_100, "sadcloud")
+		if err != nil {
+			return nil, err
+		}
+		f.UpdateConfig(certs, providers)
+		return f, nil
 	}
 
 	// This error indicates that the validator has discarded all masquerades.
@@ -635,10 +601,8 @@ func TestCustomValidators(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testContext := newFrontingContext(test.name)
-			setup(testContext, test.validator)
-			direct, ok := testContext.NewFronted(30 * time.Second)
-			require.True(t, ok)
+			direct, err := setup(test.validator)
+			require.NoError(t, err)
 			client := &http.Client{
 				Transport: direct,
 			}
@@ -828,49 +792,49 @@ func TestVerifyPeerCertificate(t *testing.T) {
 func TestFindWorkingMasquerades(t *testing.T) {
 	tests := []struct {
 		name                string
-		masquerades         []*mockMasquerade
+		masquerades         []*mockFront
 		expectedSuccessful  int
 		expectedMasquerades int
 	}{
 		{
 			name: "All successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+			masquerades: []*mockFront{
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain2.com", "2.2.2.2", 0, true),
+				newMockFront("domain3.com", "3.3.3.3", 0, true),
+				newMockFront("domain4.com", "4.4.4.4", 0, true),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
 			},
 			expectedSuccessful: 4,
 		},
 		{
 			name: "Some successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, false),
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
+			masquerades: []*mockFront{
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
+				newMockFront("domain2.com", "2.2.2.2", 0, false),
+				newMockFront("domain3.com", "3.3.3.3", 0, true),
+				newMockFront("domain4.com", "4.4.4.4", 0, false),
+				newMockFront("domain1.com", "1.1.1.1", 0, true),
 			},
 			expectedSuccessful: 2,
 		},
 		{
 			name: "None successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, false),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, false),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, false),
+			masquerades: []*mockFront{
+				newMockFront("domain1.com", "1.1.1.1", 0, false),
+				newMockFront("domain2.com", "2.2.2.2", 0, false),
+				newMockFront("domain3.com", "3.3.3.3", 0, false),
+				newMockFront("domain4.com", "4.4.4.4", 0, false),
 			},
 			expectedSuccessful: 0,
 		},
 		{
 			name: "Batch processing",
-			masquerades: func() []*mockMasquerade {
-				var masquerades []*mockMasquerade
+			masquerades: func() []*mockFront {
+				var masquerades []*mockFront
 				for i := 0; i < 50; i++ {
-					masquerades = append(masquerades, newMockMasquerade(fmt.Sprintf("domain%d.com", i), fmt.Sprintf("1.1.1.%d", i), 0, i%2 == 0))
+					masquerades = append(masquerades, newMockFront(fmt.Sprintf("domain%d.com", i), fmt.Sprintf("1.1.1.%d", i), 0, i%2 == 0))
 				}
 				return masquerades
 			}(),
@@ -880,151 +844,79 @@ func TestFindWorkingMasquerades(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &fronted{}
-			d.providers = make(map[string]*Provider)
-			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
-			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
+			f := &fronted{
+				connectingFronts: newConnectingFronts(10),
+				stopCh:           make(chan interface{}, 10),
+			}
+			f.providers = make(map[string]*Provider)
+			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
+			f.fronts = make(sortedFronts, len(tt.masquerades))
 			for i, m := range tt.masquerades {
-				d.masquerades[i] = m
+				f.fronts[i] = m
 			}
 
-			var successful atomic.Uint32
-			d.vetBatch(0, 10, &successful, nil)
+			f.tryAllFronts()
 
 			tries := 0
-			for successful.Load() < uint32(tt.expectedSuccessful) && tries < 100 {
+			for f.connectingFronts.size() < tt.expectedSuccessful && tries < 100 {
 				time.Sleep(30 * time.Millisecond)
 				tries++
 			}
 
-			assert.GreaterOrEqual(t, int(successful.Load()), tt.expectedSuccessful)
+			assert.GreaterOrEqual(t, f.connectingFronts.size(), tt.expectedSuccessful)
 		})
 	}
 }
 
-func TestMasqueradeToTry(t *testing.T) {
-	min := time.Now().Add(-time.Minute)
-	hour := time.Now().Add(-time.Hour)
-	domain1 := newMockMasqueradeWithLastSuccess("domain1.com", "1.1.1.1", 0, true, min)
-	domain2 := newMockMasqueradeWithLastSuccess("domain2.com", "2.2.2.2", 0, true, hour)
-	tests := []struct {
-		name             string
-		masquerades      sortedMasquerades
-		triedMasquerades map[MasqueradeInterface]bool
-		expected         MasqueradeInterface
-	}{
-		{
-			name: "No tried masquerades",
-			masquerades: sortedMasquerades{
-				domain1,
-				domain2,
+func TestLoadFronts(t *testing.T) {
+	providers := map[string]*Provider{
+		"provider1": {
+			Masquerades: []*Masquerade{
+				{Domain: "domain1.com", IpAddress: "1.1.1.1"},
+				{Domain: "domain2.com", IpAddress: "2.2.2.2"},
 			},
-			triedMasquerades: map[MasqueradeInterface]bool{},
-			expected:         domain1,
 		},
-		{
-			name: "Some tried masquerades",
-			masquerades: sortedMasquerades{
-				domain1,
-				domain2,
+		"provider2": {
+			Masquerades: []*Masquerade{
+				{Domain: "domain3.com", IpAddress: "3.3.3.3"},
+				{Domain: "domain4.com", IpAddress: "4.4.4.4"},
 			},
-			triedMasquerades: map[MasqueradeInterface]bool{
-				domain1: true,
-			},
-			expected: domain2,
-		},
-		{
-			name: "All masquerades tried",
-			masquerades: sortedMasquerades{
-				domain1,
-				domain2,
-			},
-			triedMasquerades: map[MasqueradeInterface]bool{
-				domain1: true,
-				domain2: true,
-			},
-			expected: nil,
-		},
-		{
-			name:             "Empty masquerades list",
-			masquerades:      sortedMasquerades{},
-			triedMasquerades: map[MasqueradeInterface]bool{},
-			expected:         nil,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := &fronted{}
-			masquerades := tt.masquerades.sortedCopy()
-			result, _ := f.masqueradeToTry(masquerades, tt.triedMasquerades)
-			assert.Equal(t, tt.expected, result)
-		})
+	expected := map[string]bool{
+		"domain1.com": true,
+		"domain2.com": true,
+		"domain3.com": true,
+		"domain4.com": true,
+	}
+
+	masquerades := loadFronts(providers)
+
+	assert.Equal(t, 4, len(masquerades), "Unexpected number of masquerades loaded")
+
+	for _, m := range masquerades {
+		assert.True(t, expected[m.getDomain()], "Unexpected masquerade domain: %s", m.getDomain())
 	}
 }
 
-func TestDialAll(t *testing.T) {
+func TestRandRange(t *testing.T) {
 	tests := []struct {
-		name                string
-		masquerades         []*mockMasquerade
-		expectedSuccessful  bool
-		expectedMasquerades int
+		min, max int
 	}{
-		{
-			name: "All successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 0, true),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 0, true),
-			},
-			expectedSuccessful: true,
-		},
-		{
-			name: "Some successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 0, true),
-				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 0, true),
-				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
-			},
-			expectedSuccessful: true,
-		},
-		{
-			name: "None successful",
-			masquerades: []*mockMasquerade{
-				newMockMasquerade("domain1.com", "1.1.1.1", 1*time.Millisecond, false),
-				newMockMasquerade("domain2.com", "2.2.2.2", 1*time.Millisecond, false),
-				newMockMasquerade("domain3.com", "3.3.3.3", 1*time.Millisecond, false),
-				newMockMasquerade("domain4.com", "4.4.4.4", 1*time.Millisecond, false),
-			},
-			expectedSuccessful: false,
-		},
+		{1, 10},
+		{5, 15},
+		{0, 100},
+		{-10, 10},
+		{50, 60},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := &fronted{}
-			d.providers = make(map[string]*Provider)
-			d.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil)
-			d.masquerades = make(sortedMasquerades, len(tt.masquerades))
-			for i, m := range tt.masquerades {
-				d.masquerades[i] = m
-			}
-
-			ctx := context.Background()
-			conn, m, masqueradeGood, err := d.dialAll(ctx)
-
-			if tt.expectedSuccessful {
-				assert.NoError(t, err)
-				assert.NotNil(t, conn)
-				assert.NotNil(t, m)
-				assert.NotNil(t, masqueradeGood)
-			} else {
-				assert.Error(t, err)
-				assert.Nil(t, conn)
-				assert.Nil(t, m)
-				assert.Nil(t, masqueradeGood)
+		t.Run(fmt.Sprintf("min=%d,max=%d", tt.min, tt.max), func(t *testing.T) {
+			for i := 0; i < 100; i++ {
+				result := randRange(tt.min, tt.max)
+				assert.GreaterOrEqual(t, result, tt.min)
+				assert.Less(t, result, tt.max)
 			}
 		})
 	}
@@ -1032,14 +924,14 @@ func TestDialAll(t *testing.T) {
 
 // Generate a mock of a MasqueradeInterface with a Dial method that can optionally
 // return an error after a specified number of milliseconds.
-func newMockMasquerade(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockMasquerade {
-	return newMockMasqueradeWithLastSuccess(domain, ipAddress, timeout, passesCheck, time.Time{})
+func newMockFront(domain string, ipAddress string, timeout time.Duration, passesCheck bool) *mockFront {
+	return newMockFrontWithLastSuccess(domain, ipAddress, timeout, passesCheck, time.Time{})
 }
 
 // Generate a mock of a MasqueradeInterface with a Dial method that can optionally
 // return an error after a specified number of milliseconds.
-func newMockMasqueradeWithLastSuccess(domain string, ipAddress string, timeout time.Duration, passesCheck bool, lastSucceededTime time.Time) *mockMasquerade {
-	return &mockMasquerade{
+func newMockFrontWithLastSuccess(domain string, ipAddress string, timeout time.Duration, passesCheck bool, lastSucceededTime time.Time) *mockFront {
+	return &mockFront{
 		Domain:            domain,
 		IpAddress:         ipAddress,
 		timeout:           timeout,
@@ -1048,7 +940,7 @@ func newMockMasqueradeWithLastSuccess(domain string, ipAddress string, timeout t
 	}
 }
 
-type mockMasquerade struct {
+type mockFront struct {
 	Domain            string
 	IpAddress         string
 	timeout           time.Duration
@@ -1057,22 +949,27 @@ type mockMasquerade struct {
 }
 
 // setLastSucceeded implements MasqueradeInterface.
-func (m *mockMasquerade) setLastSucceeded(succeededTime time.Time) {
+func (m *mockFront) setLastSucceeded(succeededTime time.Time) {
 	m.lastSucceededTime = succeededTime
 }
 
 // lastSucceeded implements MasqueradeInterface.
-func (m *mockMasquerade) lastSucceeded() time.Time {
+func (m *mockFront) lastSucceeded() time.Time {
 	return m.lastSucceededTime
 }
 
+// isSucceeding implements MasqueradeInterface.
+func (m *mockFront) isSucceeding() bool {
+	return m.lastSucceededTime.After(time.Time{})
+}
+
 // postCheck implements MasqueradeInterface.
-func (m *mockMasquerade) postCheck(net.Conn, string) bool {
+func (m *mockFront) postCheck(net.Conn, string) bool {
 	return m.passesCheck
 }
 
 // dial implements MasqueradeInterface.
-func (m *mockMasquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
+func (m *mockFront) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
 	if m.timeout > 0 {
 		time.Sleep(m.timeout)
 		return nil, errors.New("mock dial error")
@@ -1082,28 +979,28 @@ func (m *mockMasquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHe
 }
 
 // getDomain implements MasqueradeInterface.
-func (m *mockMasquerade) getDomain() string {
+func (m *mockFront) getDomain() string {
 	return m.Domain
 }
 
 // getIpAddress implements MasqueradeInterface.
-func (m *mockMasquerade) getIpAddress() string {
+func (m *mockFront) getIpAddress() string {
 	return m.IpAddress
 }
 
 // getProviderID implements MasqueradeInterface.
-func (m *mockMasquerade) getProviderID() string {
+func (m *mockFront) getProviderID() string {
 	return "testProviderId"
 }
 
 // markFailed implements MasqueradeInterface.
-func (m *mockMasquerade) markFailed() {
+func (m *mockFront) markFailed() {
 
 }
 
 // markSucceeded implements MasqueradeInterface.
-func (m *mockMasquerade) markSucceeded() {
+func (m *mockFront) markSucceeded() {
 }
 
 // Make sure that the mockMasquerade implements the MasqueradeInterface
-var _ MasqueradeInterface = (*mockMasquerade)(nil)
+var _ Front = (*mockFront)(nil)

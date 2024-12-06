@@ -8,11 +8,11 @@ import (
 )
 
 func (d *fronted) initCaching(cacheFile string) {
-	d.prepopulateMasquerades(cacheFile)
+	d.prepopulateFronts(cacheFile)
 	go d.maintainCache(cacheFile)
 }
 
-func (d *fronted) prepopulateMasquerades(cacheFile string) {
+func (d *fronted) prepopulateFronts(cacheFile string) {
 	bytes, err := os.ReadFile(cacheFile)
 	if err != nil {
 		// This is not a big deal since we'll just fill the cache later
@@ -27,22 +27,22 @@ func (d *fronted) prepopulateMasquerades(cacheFile string) {
 	}
 
 	log.Debugf("Attempting to prepopulate masquerades from cache file: %v", cacheFile)
-	var cachedMasquerades []*masquerade
-	if err := json.Unmarshal(bytes, &cachedMasquerades); err != nil {
+	var cachedFronts []*front
+	if err := json.Unmarshal(bytes, &cachedFronts); err != nil {
 		log.Errorf("Error reading cached masquerades: %v", err)
 		return
 	}
 
-	log.Debugf("Cache contained %d masquerades", len(cachedMasquerades))
+	log.Debugf("Cache contained %d masquerades", len(cachedFronts))
 	now := time.Now()
 
 	// update last succeeded status of masquerades based on cached values
-	for _, m := range d.masquerades {
-		for _, cm := range cachedMasquerades {
-			sameMasquerade := cm.ProviderID == m.getProviderID() && cm.Domain == m.getDomain() && cm.IpAddress == m.getIpAddress()
-			cachedValueFresh := now.Sub(m.lastSucceeded()) < d.maxAllowedCachedAge
-			if sameMasquerade && cachedValueFresh {
-				m.setLastSucceeded(cm.LastSucceeded)
+	for _, f := range d.fronts {
+		for _, cf := range cachedFronts {
+			sameFront := cf.ProviderID == f.getProviderID() && cf.Domain == f.getDomain() && cf.IpAddress == f.getIpAddress()
+			cachedValueFresh := now.Sub(f.lastSucceeded()) < d.maxAllowedCachedAge
+			if sameFront && cachedValueFresh {
+				f.setLastSucceeded(cf.LastSucceeded)
 			}
 		}
 	}
@@ -75,7 +75,7 @@ func (d *fronted) maintainCache(cacheFile string) {
 
 func (d *fronted) updateCache(cacheFile string) {
 	log.Debugf("Updating cache at %v", cacheFile)
-	cache := d.masquerades.sortedCopy()
+	cache := d.fronts.sortedCopy()
 	sizeToSave := len(cache)
 	if d.maxCacheSize < sizeToSave {
 		sizeToSave = d.maxCacheSize
@@ -98,11 +98,7 @@ func (d *fronted) updateCache(cacheFile string) {
 			// parent directory does not exist
 			log.Debugf("Parent directory of cache file does not exist: %v", parent)
 		}
+	} else {
+		log.Debugf("Cache saved to disk")
 	}
-}
-
-func (d *fronted) closeCache() {
-	d.closeCacheOnce.Do(func() {
-		close(d.cacheClosed)
-	})
 }

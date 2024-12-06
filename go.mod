@@ -5,21 +5,21 @@ go 1.22.6
 toolchain go1.23.3
 
 require (
-	github.com/getlantern/eventual/v2 v2.0.2
+	github.com/alitto/pond/v2 v2.1.5
 	github.com/getlantern/golog v0.0.0-20230503153817-8e72de7e0a65
 	github.com/getlantern/keyman v0.0.0-20200819205636-76fef27c39f1
 	github.com/getlantern/netx v0.0.0-20240814210628-0984f52e2d18
 	github.com/getlantern/ops v0.0.0-20231025133620-f368ab734534
-	github.com/getlantern/tlsdialer/v3 v3.0.4
+	github.com/getlantern/tlsdialer/v3 v3.0.3
 	github.com/getlantern/waitforserver v1.0.1
-	github.com/refraction-networking/utls v1.6.7
+	github.com/refraction-networking/utls v1.3.3
 	github.com/stretchr/testify v1.8.4
 )
 
 require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/gaukas/godicttls v0.0.3 // indirect
 	github.com/getlantern/byteexec v0.0.0-20170405023437-4cfb26ec74f4 // indirect
 	github.com/getlantern/context v0.0.0-20220418194847-3d5e7a086201 // indirect
 	github.com/getlantern/elevate v0.0.0-20200430163644-2881a121236d // indirect

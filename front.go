@@ -53,7 +53,7 @@ type Masquerade struct {
 }
 
 // Create a masquerade interface for easier testing.
-type MasqueradeInterface interface {
+type Front interface {
 	dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error)
 
 	// Accessor for the domain of the masquerade
@@ -73,9 +73,11 @@ type MasqueradeInterface interface {
 	postCheck(net.Conn, string) bool
 
 	getProviderID() string
+
+	isSucceeding() bool
 }
 
-type masquerade struct {
+type front struct {
 	Masquerade
 	// lastSucceeded: the most recent time at which this Masquerade succeeded
 	LastSucceeded time.Time
@@ -84,7 +86,7 @@ type masquerade struct {
 	mx         sync.RWMutex
 }
 
-func (m *masquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
+func (m *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
 	tlsConfig := &tls.Config{
 		ServerName: m.Domain,
 		RootCAs:    rootCAs,
@@ -120,7 +122,7 @@ func (m *masquerade) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloI
 }
 
 // postCheck does a post with invalid data to verify domain-fronting works
-func (m *masquerade) postCheck(conn net.Conn, testURL string) bool {
+func (m *front) postCheck(conn net.Conn, testURL string) bool {
 	client := &http.Client{
 		Transport: frontedHTTPTransport(conn, true),
 	}
@@ -162,55 +164,61 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 }
 
 // getDomain implements MasqueradeInterface.
-func (m *masquerade) getDomain() string {
+func (m *front) getDomain() string {
 	return m.Domain
 }
 
 // getIpAddress implements MasqueradeInterface.
-func (m *masquerade) getIpAddress() string {
+func (m *front) getIpAddress() string {
 	return m.IpAddress
 }
 
 // getProviderID implements MasqueradeInterface.
-func (m *masquerade) getProviderID() string {
+func (m *front) getProviderID() string {
 	return m.ProviderID
 }
 
 // MarshalJSON marshals masquerade into json
-func (m *masquerade) MarshalJSON() ([]byte, error) {
+func (m *front) MarshalJSON() ([]byte, error) {
 	m.mx.RLock()
 	defer m.mx.RUnlock()
 	// Type alias for masquerade so that we don't infinitely recurse when marshaling the struct
-	type alias masquerade
+	type alias front
 	return json.Marshal((*alias)(m))
 }
 
-func (m *masquerade) lastSucceeded() time.Time {
+func (m *front) lastSucceeded() time.Time {
 	m.mx.RLock()
 	defer m.mx.RUnlock()
 	return m.LastSucceeded
 }
 
-func (m *masquerade) setLastSucceeded(t time.Time) {
+func (m *front) setLastSucceeded(t time.Time) {
 	m.mx.Lock()
 	defer m.mx.Unlock()
 	m.LastSucceeded = t
 }
 
-func (m *masquerade) markSucceeded() {
+func (m *front) markSucceeded() {
 	m.mx.Lock()
 	defer m.mx.Unlock()
 	m.LastSucceeded = time.Now()
 }
 
-func (m *masquerade) markFailed() {
+func (m *front) markFailed() {
 	m.mx.Lock()
 	defer m.mx.Unlock()
 	m.LastSucceeded = time.Time{}
 }
 
+func (m *front) isSucceeding() bool {
+	m.mx.RLock()
+	defer m.mx.RUnlock()
+	return m.LastSucceeded.After(time.Time{})
+}
+
 // Make sure that the masquerade struct implements the MasqueradeInterface
-var _ MasqueradeInterface = (*masquerade)(nil)
+var _ Front = (*front)(nil)
 
 // A Direct fronting provider configuration.
 type Provider struct {
@@ -343,11 +351,11 @@ func NewStatusCodeValidator(reject []int) ResponseValidator {
 }
 
 // slice of masquerade sorted by last vetted time
-type sortedMasquerades []MasqueradeInterface
+type sortedFronts []Front
 
-func (m sortedMasquerades) Len() int      { return len(m) }
-func (m sortedMasquerades) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
-func (m sortedMasquerades) Less(i, j int) bool {
+func (m sortedFronts) Len() int      { return len(m) }
+func (m sortedFronts) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
+func (m sortedFronts) Less(i, j int) bool {
 	if m[i].lastSucceeded().After(m[j].lastSucceeded()) {
 		return true
 	} else if m[j].lastSucceeded().After(m[i].lastSucceeded()) {
@@ -357,8 +365,8 @@ func (m sortedMasquerades) Less(i, j int) bool {
 	}
 }
 
-func (m sortedMasquerades) sortedCopy() sortedMasquerades {
-	c := make(sortedMasquerades, len(m))
+func (m sortedFronts) sortedCopy() sortedFronts {
+	c := make(sortedFronts, len(m))
 	copy(c, m)
 	sort.Sort(c)
 	return c

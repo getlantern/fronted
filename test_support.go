@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/getlantern/keyman"
+	tls "github.com/refraction-networking/utls"
 )
 
 var (
@@ -16,20 +17,30 @@ var (
 
 // ConfigureForTest configures fronted for testing using default masquerades and
 // certificate authorities.
-func ConfigureForTest(t *testing.T) {
-	ConfigureCachingForTest(t, "")
+func ConfigureForTest(t *testing.T) Fronted {
+	return ConfigureCachingForTest(t, "")
 }
 
-func ConfigureCachingForTest(t *testing.T, cacheFile string) {
+func ConfigureCachingForTest(t *testing.T, cacheFile string) Fronted {
 	certs := trustedCACerts(t)
 	p := testProviders()
-	Configure(certs, p, testProviderID, cacheFile)
+	f, err := NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
+	if err != nil {
+		t.Fatalf("Unable to create fronted: %v", err)
+	}
+	f.UpdateConfig(certs, p)
+	return f
 }
 
-func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) {
+func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) Fronted {
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	Configure(certs, p, testProviderID, "")
+	f, err := NewFronted("", tls.HelloChrome_100, testProviderID)
+	if err != nil {
+		t.Fatalf("Unable to create fronted: %v", err)
+	}
+	f.UpdateConfig(certs, p)
+	return f
 }
 
 func trustedCACerts(t *testing.T) *x509.CertPool {

@@ -12,12 +12,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 18
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version-file: "go.mod"
-    - name: Run unit tests
-      run: go test -failfast -coverprofile=profile.cov
+    - name: Install go go-ctrf-json-reporter
+      run: go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@latest
+    - name: Run tests
+      run: go test -json -race -tags="headless" -coverprofile=profile.cov ./... | go-ctrf-json-reporter -output ctrf-report.json
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctrf-report
+        path: ctrf-report.json
+    - name: Publish Test Summary Results
+      run: npx github-actions-ctrf ctrf-report.json
     - name: Install goveralls
       run: go install github.com/mattn/goveralls@latest
     - name: Send coverage
