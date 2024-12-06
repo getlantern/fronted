@@ -53,7 +53,6 @@ type fronted struct {
 	connectingFronts    connectingFronts
 	providersMu         sync.RWMutex
 	frontsMu            sync.RWMutex
-	frontedMu           sync.RWMutex
 	stopCh              chan interface{}
 	crawlOnce           sync.Once
 	stopped             atomic.Bool
@@ -114,11 +113,8 @@ func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provid
 		return
 	}
 	providersCopy := copyProviders(providers)
-	f.frontedMu.Lock()
-	defer f.frontedMu.Unlock()
 	f.addProviders(providersCopy)
 	f.addFronts(loadFronts(providersCopy))
-
 	f.certPool.Store(pool)
 
 	// The goroutine for finding working fronts runs forever, so only start it once.
