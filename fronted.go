@@ -608,7 +608,7 @@ func (ddf *directTransport) RoundTrip(req *http.Request) (resp *http.Response, e
 func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
 	url := *req.URL
 	url.Host = frontedHost
-	r, err := http.NewRequest(req.Method, url.String(), body)
+	r, err := http.NewRequestWithContext(req.Context(), req.Method, url.String(), body)
 	if err != nil {
 		return nil, err
 	}
