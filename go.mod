@@ -1,8 +1,8 @@
 module github.com/getlantern/fronted
 
-go 1.22.6
+go 1.22.4
 
-toolchain go1.23.3
+toolchain go1.22.8
 
 require (
 	github.com/alitto/pond/v2 v2.1.5
