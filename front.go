@@ -70,7 +70,7 @@ type Front interface {
 
 	setLastSucceeded(time.Time)
 
-	postCheck(net.Conn, string) bool
+	verifyWithPost(net.Conn, string) bool
 
 	getProviderID() string
 
@@ -121,8 +121,8 @@ func (m *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (n
 	return dialer.Dial("tcp", addr)
 }
 
-// postCheck does a post with invalid data to verify domain-fronting works
-func (m *front) postCheck(conn net.Conn, testURL string) bool {
+// verifyWithPost does a post with invalid data to verify domain-fronting works
+func (m *front) verifyWithPost(conn net.Conn, testURL string) bool {
 	client := &http.Client{
 		Transport: frontedHTTPTransport(conn, true),
 	}

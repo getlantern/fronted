@@ -963,8 +963,8 @@ func (m *mockFront) isSucceeding() bool {
 	return m.lastSucceededTime.After(time.Time{})
 }
 
-// postCheck implements MasqueradeInterface.
-func (m *mockFront) postCheck(net.Conn, string) bool {
+// verifyWithPost implements MasqueradeInterface.
+func (m *mockFront) verifyWithPost(net.Conn, string) bool {
 	return m.passesCheck
 }
 

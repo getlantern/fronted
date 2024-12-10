@@ -206,7 +206,7 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 		return false
 	}
 	defer conn.Close()
-	return masq.postCheck(conn, testURL)
+	return masq.verifyWithPost(conn, testURL)
 }
 
 // findWorkingFronts finds working domain fronts by testing them using a worker pool. Speed
@@ -286,7 +286,7 @@ func (f *fronted) frontAt(i int) Front {
 }
 
 func (f *fronted) vetFront(m Front) bool {
-	conn, masqueradeGood, err := f.dialFront(m)
+	conn, markWithResult, err := f.dialFront(m)
 	if err != nil {
 		log.Debugf("unexpected error vetting masquerades: %v", err)
 		return false
@@ -303,7 +303,7 @@ func (f *fronted) vetFront(m Front) bool {
 			m.getProviderID(), f.providers)
 		return false
 	}
-	if !masqueradeGood(m.postCheck(conn, provider.TestURL)) {
+	if !markWithResult(m.verifyWithPost(conn, provider.TestURL)) {
 		log.Debugf("Unsuccessful vetting with POST request, discarding masquerade")
 		return false
 	}
@@ -450,7 +450,7 @@ func (f *fronted) dialFront(m Front) (net.Conn, func(bool) bool, error) {
 	// we expect.
 	start := time.Now()
 	conn, retriable, err := f.doDial(m)
-	masqueradeGood := func(good bool) bool {
+	markWithResult := func(good bool) bool {
 		if good {
 			m.markSucceeded()
 		} else {
@@ -461,12 +461,12 @@ func (f *fronted) dialFront(m Front) (net.Conn, func(bool) bool, error) {
 	}
 	if err == nil {
 		log.Debugf("Returning connection for masquerade %v in %v", m.getIpAddress(), time.Since(start))
-		return conn, masqueradeGood, err
+		return conn, markWithResult, err
 	} else if !retriable {
 		log.Debugf("Dropping masquerade: non retryable error: %v", err)
-		masqueradeGood(false)
+		markWithResult(false)
 	}
-	return conn, masqueradeGood, err
+	return conn, markWithResult, err
 }
 
 func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
