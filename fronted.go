@@ -85,10 +85,11 @@ func NewFronted(cacheFile string) Fronted {
 		cacheDirty:          make(chan interface{}, 1),
 		cacheClosed:         make(chan interface{}),
 		providers:           make(map[string]*Provider),
-		clientHelloID:       tls.HelloAndroid_11_OkHttp,
-		connectingFronts:    newConnectingFronts(4000),
-		stopCh:              make(chan interface{}, 10),
-		defaultProviderID:   defaultFrontedProviderID,
+		// We can and should update this as new ClientHellos become available in utls.
+		clientHelloID:     tls.HelloAndroid_11_OkHttp,
+		connectingFronts:  newConnectingFronts(4000),
+		stopCh:            make(chan interface{}, 10),
+		defaultProviderID: defaultFrontedProviderID,
 	}
 
 	if cacheFile != "" {
@@ -119,92 +120,6 @@ func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	})
 }
 
-func copyProviders(providers map[string]*Provider) map[string]*Provider {
-	providersCopy := make(map[string]*Provider, len(providers))
-	for key, p := range providers {
-		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
-	}
-	return providersCopy
-}
-
-func loadFronts(providers map[string]*Provider) sortedFronts {
-	log.Debugf("Loading candidates for %d providers", len(providers))
-	defer log.Debug("Finished loading candidates")
-
-	// Preallocate the slice to avoid reallocation
-	size := 0
-	for _, p := range providers {
-		size += len(p.Masquerades)
-	}
-
-	fronts := make(sortedFronts, size)
-
-	// Note that map iteration order is random, so the order of the providers is automatically randomized.
-	index := 0
-	for key, p := range providers {
-		arr := p.Masquerades
-		size := len(arr)
-
-		// Shuffle the masquerades to avoid biasing the order in which they are tried
-		// make a shuffled copy of arr
-		// ('inside-out' Fisher-Yates)
-		sh := make([]*Masquerade, size)
-		for i := 0; i < size; i++ {
-			j := rand.IntN(i + 1) // 0 <= j <= i
-			sh[i] = sh[j]
-			sh[j] = arr[i]
-		}
-
-		for _, c := range sh {
-			fronts[index] = &front{Masquerade: *c, ProviderID: key}
-			index++
-		}
-	}
-	return fronts
-}
-
-func (f *fronted) addProviders(providers map[string]*Provider) {
-	// Add new providers to the existing providers map, overwriting any existing ones.
-	f.providersMu.Lock()
-	defer f.providersMu.Unlock()
-	for key, p := range providers {
-		f.providers[key] = p
-	}
-}
-
-func (f *fronted) addFronts(fronts sortedFronts) {
-	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
-	f.fronts = append(fronts, f.fronts...)
-}
-
-func (f *fronted) providerFor(m Front) *Provider {
-	pid := m.getProviderID()
-	if pid == "" {
-		pid = f.defaultProviderID
-	}
-	return f.providers[pid]
-}
-
-// Vet vets the specified Masquerade, verifying certificate using the given CertPool.
-// This is used in genconfig.
-func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
-	d := &fronted{
-		certPool:            atomic.Value{},
-		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
-		maxCacheSize:        defaultMaxCacheSize,
-	}
-	d.certPool.Store(pool)
-	masq := &front{Masquerade: *m}
-	conn, _, err := d.doDial(masq)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-	return masq.verifyWithPost(conn, testURL)
-}
-
 // findWorkingFronts finds working domain fronts by testing them using a worker pool. Speed
 // is of the essence here, as without working fronts, users will
 // be unable to fetch proxy configurations, particularly in the case of a first time
@@ -222,6 +137,10 @@ func (f *fronted) findWorkingFronts() {
 			log.Debug("findWorkingFronts::Trying all fronts")
 			f.tryAllFronts()
 			log.Debug("findWorkingFronts::Tried all fronts")
+
+			// Sleep to avoid spinning infinitely in the case where we don't even know of fronts
+			// to try, for example.
+			time.Sleep(1 * time.Second)
 		} else {
 			log.Debug("findWorkingFronts::Enough working fronts...sleeping")
 			select {
@@ -236,7 +155,7 @@ func (f *fronted) findWorkingFronts() {
 }
 
 func (f *fronted) tryAllFronts() {
-	// Vet fronts using a worker pool of 40 goroutines.
+	// Find working fronts using a worker pool of goroutines.
 	pool := pond.NewPool(40)
 
 	// Submit all fronts to the worker pool.
@@ -633,4 +552,90 @@ func (f *fronted) Close() {
 
 func (f *fronted) isStopped() bool {
 	return f.stopped.Load()
+}
+
+func copyProviders(providers map[string]*Provider) map[string]*Provider {
+	providersCopy := make(map[string]*Provider, len(providers))
+	for key, p := range providers {
+		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
+	}
+	return providersCopy
+}
+
+func loadFronts(providers map[string]*Provider) sortedFronts {
+	log.Debugf("Loading candidates for %d providers", len(providers))
+	defer log.Debug("Finished loading candidates")
+
+	// Preallocate the slice to avoid reallocation
+	size := 0
+	for _, p := range providers {
+		size += len(p.Masquerades)
+	}
+
+	fronts := make(sortedFronts, size)
+
+	// Note that map iteration order is random, so the order of the providers is automatically randomized.
+	index := 0
+	for key, p := range providers {
+		arr := p.Masquerades
+		size := len(arr)
+
+		// Shuffle the masquerades to avoid biasing the order in which they are tried
+		// make a shuffled copy of arr
+		// ('inside-out' Fisher-Yates)
+		sh := make([]*Masquerade, size)
+		for i := 0; i < size; i++ {
+			j := rand.IntN(i + 1) // 0 <= j <= i
+			sh[i] = sh[j]
+			sh[j] = arr[i]
+		}
+
+		for _, c := range sh {
+			fronts[index] = &front{Masquerade: *c, ProviderID: key}
+			index++
+		}
+	}
+	return fronts
+}
+
+func (f *fronted) addProviders(providers map[string]*Provider) {
+	// Add new providers to the existing providers map, overwriting any existing ones.
+	f.providersMu.Lock()
+	defer f.providersMu.Unlock()
+	for key, p := range providers {
+		f.providers[key] = p
+	}
+}
+
+func (f *fronted) addFronts(fronts sortedFronts) {
+	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
+	f.frontsMu.Lock()
+	defer f.frontsMu.Unlock()
+	f.fronts = append(fronts, f.fronts...)
+}
+
+func (f *fronted) providerFor(m Front) *Provider {
+	pid := m.getProviderID()
+	if pid == "" {
+		pid = f.defaultProviderID
+	}
+	return f.providers[pid]
+}
+
+// Vet vets the specified Masquerade, verifying certificate using the given CertPool.
+// This is used in genconfig.
+func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
+	d := &fronted{
+		certPool:            atomic.Value{},
+		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
+		maxCacheSize:        defaultMaxCacheSize,
+	}
+	d.certPool.Store(pool)
+	masq := &front{Masquerade: *m}
+	conn, _, err := d.doDial(masq)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	return masq.verifyWithPost(conn, testURL)
 }
