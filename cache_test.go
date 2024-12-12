@@ -36,8 +36,8 @@ func TestCaching(t *testing.T) {
 			cacheDirty:          make(chan interface{}, 1),
 			cacheClosed:         make(chan interface{}),
 			providers:           providers,
-			defaultProviderID:   cloudsackID,
 			stopCh:              make(chan interface{}, 10),
+			defaultProviderID:   cloudsackID,
 		}
 		go f.maintainCache(cacheFile)
 		return f

@@ -57,9 +57,9 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		UseArbitrarySNIs: true,
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
-	transport, err := NewFronted(cacheFile, tls.HelloChrome_100, "akamai")
-	require.NoError(t, err)
-	transport.UpdateConfig(certs, p)
+	defaultFrontedProviderID = "akamai"
+	transport := NewFronted(cacheFile)
+	transport.OnNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -85,9 +85,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	transport, err := NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
-	require.NoError(t, err)
-	transport.UpdateConfig(certs, p)
+	defaultFrontedProviderID = testProviderID
+	transport := NewFronted(cacheFile)
+	transport.OnNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -95,9 +95,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	transport, err = NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
-	require.NoError(t, err)
-	transport.UpdateConfig(certs, p)
+	defaultFrontedProviderID = testProviderID
+	transport = NewFronted(cacheFile)
+	transport.OnNewFronts(certs, p)
 	client = &http.Client{
 		Transport: transport,
 	}
@@ -210,9 +210,10 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	rt, err := NewFronted("", tls.HelloChrome_100, "cloudsack")
-	require.NoError(t, err)
-	rt.UpdateConfig(certs, map[string]*Provider{"cloudsack": p})
+	defaultFrontedProviderID = "cloudsack"
+	rt := NewFronted("")
+
+	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -320,9 +321,9 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	rt, err := NewFronted("", tls.HelloChrome_100, "cloudsack")
-	require.NoError(t, err)
-	rt.UpdateConfig(certs, providers)
+	defaultFrontedProviderID = "cloudsack"
+	rt := NewFronted("")
+	rt.OnNewFronts(certs, providers)
 
 	client := &http.Client{Transport: rt}
 
@@ -445,9 +446,9 @@ func TestPassthrough(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	rt, err := NewFronted("", tls.HelloChrome_100, "cloudsack")
-	require.NoError(t, err)
-	rt.UpdateConfig(certs, map[string]*Provider{"cloudsack": p})
+	defaultFrontedProviderID = "cloudsack"
+	rt := NewFronted("")
+	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -515,11 +516,9 @@ func TestCustomValidators(t *testing.T) {
 			"sadcloud": p,
 		}
 
-		f, err := NewFronted("", tls.HelloChrome_100, "sadcloud")
-		if err != nil {
-			return nil, err
-		}
-		f.UpdateConfig(certs, providers)
+		defaultFrontedProviderID = "sadcloud"
+		f := NewFronted("")
+		f.OnNewFronts(certs, providers)
 		return f, nil
 	}
 

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/getlantern/keyman"
-	tls "github.com/refraction-networking/utls"
 )
 
 var (
@@ -24,22 +23,18 @@ func ConfigureForTest(t *testing.T) Fronted {
 func ConfigureCachingForTest(t *testing.T, cacheFile string) Fronted {
 	certs := trustedCACerts(t)
 	p := testProviders()
-	f, err := NewFronted(cacheFile, tls.HelloChrome_100, testProviderID)
-	if err != nil {
-		t.Fatalf("Unable to create fronted: %v", err)
-	}
-	f.UpdateConfig(certs, p)
+	defaultFrontedProviderID = testProviderID
+	f := NewFronted(cacheFile)
+	f.OnNewFronts(certs, p)
 	return f
 }
 
 func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) Fronted {
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	f, err := NewFronted("", tls.HelloChrome_100, testProviderID)
-	if err != nil {
-		t.Fatalf("Unable to create fronted: %v", err)
-	}
-	f.UpdateConfig(certs, p)
+	defaultFrontedProviderID = testProviderID
+	f := NewFronted("")
+	f.OnNewFronts(certs, p)
 	return f
 }
 

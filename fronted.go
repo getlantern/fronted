@@ -33,7 +33,8 @@ const (
 )
 
 var (
-	log = golog.LoggerFor("fronted")
+	log                      = golog.LoggerFor("fronted")
+	defaultFrontedProviderID = "cloudfront"
 )
 
 // fronted identifies working IP address/domain pairings for domain fronting and is
@@ -62,22 +63,18 @@ type fronted struct {
 type Fronted interface {
 	http.RoundTripper
 
-	// UpdateConfig updates the set of domain fronts to try.
-	UpdateConfig(pool *x509.CertPool, providers map[string]*Provider)
+	// OnNewFronts updates the set of domain fronts to try.
+	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider)
 
 	// Close closes any resources, such as goroutines that are testing fronts.
 	Close()
 }
 
-// NewFronted creates a new Fronted instance with the given cache file, clientHelloID, and defaultProviderID.
+// NewFronted creates a new Fronted instance with the given cache file.
 // At this point it does not have the actual IPs, domains, etc of the fronts to try.
 // defaultProviderID is used when a front without a provider is encountered (eg in a cache file)
-func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProviderID string) (Fronted, error) {
+func NewFronted(cacheFile string) Fronted {
 	log.Debug("Creating new fronted")
-	// Log method elapsed time
-	defer func(start time.Time) {
-		log.Debugf("Creating a new fronted took %v", time.Since(start))
-	}(time.Now())
 
 	f := &fronted{
 		certPool:            atomic.Value{},
@@ -88,23 +85,22 @@ func NewFronted(cacheFile string, clientHello tls.ClientHelloID, defaultProvider
 		cacheDirty:          make(chan interface{}, 1),
 		cacheClosed:         make(chan interface{}),
 		providers:           make(map[string]*Provider),
-		clientHelloID:       clientHello,
+		clientHelloID:       tls.HelloAndroid_11_OkHttp,
 		connectingFronts:    newConnectingFronts(4000),
 		stopCh:              make(chan interface{}, 10),
-		defaultProviderID:   defaultProviderID,
+		defaultProviderID:   defaultFrontedProviderID,
 	}
 
 	if cacheFile != "" {
 		f.initCaching(cacheFile)
 	}
 
-	return f, nil
+	return f
 }
 
-// UpdateConfig sets the domain fronts to use, the trusted root CAs, the fronting providers
-// (such as Akamai, Cloudfront, etc), and the cache file for caching fronts to set up
-// domain fronting.
-func (f *fronted) UpdateConfig(pool *x509.CertPool, providers map[string]*Provider) {
+// OnNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
+// (such as Akamai, Cloudfront, etc)
+func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
 	log.Debug("Updating fronted configuration")
