@@ -14,9 +14,14 @@ func (d *fronted) initCaching(cacheFile string) {
 
 func (d *fronted) prepopulateFronts(cacheFile string) {
 	bytes, err := os.ReadFile(cacheFile)
+	if os.IsNotExist(err) {
+		if err = os.MkdirAll(filepath.Dir(cacheFile), 0755); err != nil {
+			log.Errorf("Error creating cache directory: %v", err)
+			return
+		}
+	}
 	if err != nil {
-		// This is not a big deal since we'll just fill the cache later
-		log.Debugf("ignorable error: Unable to read cache file for prepopulation: %v", err)
+		log.Errorf("Error reading cache file: %v", err)
 		return
 	}
 
