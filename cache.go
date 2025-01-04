@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func (d *fronted) initCaching(cacheFile string) {
-	d.prepopulateFronts(cacheFile)
-	go d.maintainCache(cacheFile)
+func (f *fronted) initCaching(cacheFile string) {
+	f.prepopulateFronts(cacheFile)
+	go f.maintainCache(cacheFile)
 }
 
-func (d *fronted) prepopulateFronts(cacheFile string) {
+func (f *fronted) prepopulateFronts(cacheFile string) {
 	bytes, err := os.ReadFile(cacheFile)
 	if os.IsNotExist(err) {
 		if err = os.MkdirAll(filepath.Dir(cacheFile), 0755); err != nil {
@@ -42,48 +42,48 @@ func (d *fronted) prepopulateFronts(cacheFile string) {
 	now := time.Now()
 
 	// update last succeeded status of masquerades based on cached values
-	for _, f := range d.fronts {
+	for _, fr := range f.fronts {
 		for _, cf := range cachedFronts {
-			sameFront := cf.ProviderID == f.getProviderID() && cf.Domain == f.getDomain() && cf.IpAddress == f.getIpAddress()
-			cachedValueFresh := now.Sub(f.lastSucceeded()) < d.maxAllowedCachedAge
+			sameFront := cf.ProviderID == fr.getProviderID() && cf.Domain == fr.getDomain() && cf.IpAddress == fr.getIpAddress()
+			cachedValueFresh := now.Sub(fr.lastSucceeded()) < f.maxAllowedCachedAge
 			if sameFront && cachedValueFresh {
-				f.setLastSucceeded(cf.LastSucceeded)
+				fr.setLastSucceeded(cf.LastSucceeded)
 			}
 		}
 	}
 }
 
-func (d *fronted) markCacheDirty() {
+func (f *fronted) markCacheDirty() {
 	select {
-	case d.cacheDirty <- nil:
+	case f.cacheDirty <- nil:
 		// okay
 	default:
 		// already dirty
 	}
 }
 
-func (d *fronted) maintainCache(cacheFile string) {
+func (f *fronted) maintainCache(cacheFile string) {
 	for {
 		select {
-		case <-d.cacheClosed:
+		case <-f.cacheClosed:
 			return
-		case <-time.After(d.cacheSaveInterval):
+		case <-time.After(f.cacheSaveInterval):
 			select {
-			case <-d.cacheClosed:
+			case <-f.cacheClosed:
 				return
-			case <-d.cacheDirty:
-				d.updateCache(cacheFile)
+			case <-f.cacheDirty:
+				f.updateCache(cacheFile)
 			}
 		}
 	}
 }
 
-func (d *fronted) updateCache(cacheFile string) {
+func (f *fronted) updateCache(cacheFile string) {
 	log.Debugf("Updating cache at %v", cacheFile)
-	cache := d.fronts.sortedCopy()
+	cache := f.fronts.sortedCopy()
 	sizeToSave := len(cache)
-	if d.maxCacheSize < sizeToSave {
-		sizeToSave = d.maxCacheSize
+	if f.maxCacheSize < sizeToSave {
+		sizeToSave = f.maxCacheSize
 	}
 	b, err := json.Marshal(cache[:sizeToSave])
 	if err != nil {

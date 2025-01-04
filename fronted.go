@@ -162,13 +162,13 @@ func (f *fronted) tryAllFronts() {
 	for i := 0; i < f.frontSize(); i++ {
 		m := f.frontAt(i)
 		pool.Submit(func() {
-			//log.Debugf("Running task #%d with front %v", i, m.getIpAddress())
+			// log.Debugf("Running task #%d with front %v", i, m.getIpAddress())
 			if f.isStopped() {
 				return
 			}
 			if f.hasEnoughWorkingFronts() {
 				// We have enough working fronts, so no need to continue.
-				//log.Debug("Enough working fronts...ignoring task")
+				// log.Debug("Enough working fronts...ignoring task")
 				return
 			}
 			working := f.vetFront(m)
@@ -258,7 +258,7 @@ func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, 
 		// store body in-memory to be able to replay it if necessary
 		body, err = io.ReadAll(req.Body)
 		if err != nil {
-			err := fmt.Errorf("unable to read request body: %v", err)
+			err = fmt.Errorf("unable to read request body: %w", err)
 			op.FailIf(err)
 			return nil, nil, err
 		}
@@ -394,7 +394,12 @@ func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
 	var conn net.Conn
 	var err error
 	retriable := false
-	conn, err = m.dial(f.certPool.Load().(*x509.CertPool), f.clientHelloID)
+	pool, ok := f.certPool.Load().(*x509.CertPool)
+	if !ok {
+		pool = nil
+	}
+	// A nil cert pool will just use the system's root CAs.
+	conn, err = m.dial(pool, f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
 			op.FailIf(err)
