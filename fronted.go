@@ -64,7 +64,7 @@ type Fronted interface {
 	http.RoundTripper
 
 	// OnNewFronts updates the set of domain fronts to try.
-	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider)
+	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider, countryCode string)
 
 	// Close closes any resources, such as goroutines that are testing fronts.
 	Close()
@@ -101,7 +101,7 @@ func NewFronted(cacheFile string) Fronted {
 
 // OnNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
 // (such as Akamai, Cloudfront, etc)
-func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
+func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider, countryCode string) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
 	log.Debug("Updating fronted configuration")
@@ -109,7 +109,7 @@ func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provide
 		log.Errorf("No providers configured")
 		return
 	}
-	providersCopy := copyProviders(providers)
+	providersCopy := copyProviders(providers, countryCode)
 	f.addProviders(providersCopy)
 	f.addFronts(loadFronts(providersCopy))
 	f.certPool.Store(pool)
@@ -559,10 +559,10 @@ func (f *fronted) isStopped() bool {
 	return f.stopped.Load()
 }
 
-func copyProviders(providers map[string]*Provider) map[string]*Provider {
+func copyProviders(providers map[string]*Provider, countryCode string) map[string]*Provider {
 	providersCopy := make(map[string]*Provider, len(providers))
 	for key, p := range providers {
-		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
+		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, nil, p.PassthroughPatterns, p.FrontingSNIs, p.VerifyHostname, countryCode)
 	}
 	return providersCopy
 }

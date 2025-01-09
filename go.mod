@@ -12,6 +12,7 @@ require (
 	github.com/getlantern/ops v0.0.0-20231025133620-f368ab734534
 	github.com/getlantern/tlsdialer/v3 v3.0.3
 	github.com/getlantern/waitforserver v1.0.1
+	github.com/goccy/go-yaml v1.15.13
 	github.com/refraction-networking/utls v1.6.7
 	github.com/stretchr/testify v1.8.4
 )
