@@ -119,8 +119,8 @@ func (f *fronted) readFrontsFromEmbeddedConfig() {
 	f.OnNewFrontsConfig(yml, "")
 }
 
-func (f *fronted) OnNewFrontsConfig(compressedYaml []byte, countryCode string) {
-	r, gzipErr := gzip.NewReader(bytes.NewReader(compressedYaml))
+func (f *fronted) OnNewFrontsConfig(gzippedYaml []byte, countryCode string) {
+	r, gzipErr := gzip.NewReader(bytes.NewReader(gzippedYaml))
 	if gzipErr != nil {
 		slog.Error("Failed to create gzip reader", "error", gzipErr)
 		return
