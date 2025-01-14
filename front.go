@@ -59,7 +59,7 @@ type Front interface {
 	// Accessor for the domain of the masquerade
 	getDomain() string
 
-	//Accessor for the IP address of the masquerade
+	// Accessor for the IP address of the masquerade
 	getIpAddress() string
 
 	markSucceeded()
@@ -238,19 +238,12 @@ type Provider struct {
 	TestURL     string
 	Masquerades []*Masquerade
 
-	// SNIConfig has the configuration that sets if we should or not use arbitrary SNIs
-	// and which SNIs to use.
-	SNIConfig *SNIConfig
-
-	// Optional response validator used to determine whether
-	// fronting succeeded for this provider. If the validator
-	// detects a failure for a given masquerade, it is discarded.
-	// The default validator is used if nil.
-	Validator ResponseValidator
-
 	// VerifyHostname is used for checking if the certificate for a given hostname is valid.
 	// This attribute is only being defined here so it can be sent to the masquerade struct later.
 	VerifyHostname *string
+
+	// FrontingSNIs is a map of country code the the SNI config to use for that country.
+	FrontingSNIs map[string]*SNIConfig
 }
 
 type SNIConfig struct {
@@ -259,25 +252,33 @@ type SNIConfig struct {
 }
 
 // Create a Provider with the given details
-func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, sniConfig *SNIConfig, verifyHostname *string) *Provider {
-	d := &Provider{
+func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, frontingSNIs map[string]*SNIConfig, verifyHostname *string, countryCode string) *Provider {
+	p := &Provider{
 		HostAliases:         make(map[string]string),
 		TestURL:             testURL,
 		Masquerades:         make([]*Masquerade, 0, len(masquerades)),
-		Validator:           validator,
 		PassthroughPatterns: make([]string, 0, len(passthrough)),
-		SNIConfig:           sniConfig,
+		VerifyHostname:      verifyHostname,
+		FrontingSNIs:        frontingSNIs,
 	}
 	for k, v := range hosts {
-		d.HostAliases[strings.ToLower(k)] = v
+		p.HostAliases[strings.ToLower(k)] = v
 	}
 
-	for _, m := range masquerades {
-		sni := generateSNI(d.SNIConfig, m)
-		d.Masquerades = append(d.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni, VerifyHostname: verifyHostname})
+	var config *SNIConfig
+	if countryCode != "" {
+		var ok bool
+		config, ok = frontingSNIs[countryCode]
+		if !ok {
+			config = frontingSNIs["default"]
+		}
 	}
-	d.PassthroughPatterns = append(d.PassthroughPatterns, passthrough...)
-	return d
+	for _, m := range masquerades {
+		sni := generateSNI(config, m)
+		p.Masquerades = append(p.Masquerades, &Masquerade{Domain: m.Domain, IpAddress: m.IpAddress, SNI: sni, VerifyHostname: verifyHostname})
+	}
+	p.PassthroughPatterns = append(p.PassthroughPatterns, passthrough...)
+	return p
 }
 
 // generateSNI generates a SNI for the given domain and ip address
@@ -323,11 +324,7 @@ func (p *Provider) Lookup(hostname string) string {
 // response failed to reach the origin, eg if the request
 // was rejected by the provider.
 func (p *Provider) ValidateResponse(res *http.Response) error {
-	if p.Validator != nil {
-		return p.Validator(res)
-	} else {
-		return defaultValidator(res)
-	}
+	return defaultValidator(res)
 }
 
 // A validator for fronted responses.  Returns an error if the

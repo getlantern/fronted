@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	tls "github.com/refraction-networking/utls"
 
 	"github.com/getlantern/golog"
@@ -63,12 +66,18 @@ type fronted struct {
 type Fronted interface {
 	http.RoundTripper
 
+	// OnNewFrontsConfig updates the set of domain fronts to try from a YAML configuration.
+	OnNewFrontsConfig(yml []byte, countryCode string)
+
 	// OnNewFronts updates the set of domain fronts to try.
-	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider)
+	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider, countryCode string)
 
 	// Close closes any resources, such as goroutines that are testing fronts.
 	Close()
 }
+
+//go:embed fronted.yaml
+var embedFS embed.FS
 
 // NewFronted creates a new Fronted instance with the given cache file.
 // At this point it does not have the actual IPs, domains, etc of the fronts to try.
@@ -96,12 +105,53 @@ func NewFronted(cacheFile string) Fronted {
 		f.initCaching(cacheFile)
 	}
 
+	f.readFrontsFromEmbeddedConfig()
+
 	return f
+}
+
+func (f *fronted) readFrontsFromEmbeddedConfig() {
+	yml, err := embedFS.ReadFile("fronted.yaml")
+	if err != nil {
+		slog.Error("Failed to read smart dialer config", "error", err)
+	}
+	f.OnNewFrontsConfig(yml, "")
+}
+
+func (f *fronted) OnNewFrontsConfig(yml []byte, countryCode string) {
+	path, err := yaml.PathString("$.providers")
+	if err != nil {
+		slog.Error("Failed to create providers dpath", "error", err)
+		return
+	}
+	providers := make(map[string]*Provider)
+	pathErr := path.Read(bytes.NewReader(yml), &providers)
+	if pathErr != nil {
+		slog.Error("Failed to read providers", "error", pathErr)
+		return
+	}
+
+	trustedCAsPath, err := yaml.PathString("$.trustedcas")
+	if err != nil {
+		slog.Error("Failed to create trusted CA path", "error", err)
+		return
+	}
+	var trustedCAs []*CA
+	trustedCAsErr := trustedCAsPath.Read(bytes.NewReader(yml), &trustedCAs)
+	if trustedCAsErr != nil {
+		slog.Error("Failed to read trusted CAs", "error", trustedCAsErr)
+		return
+	}
+	pool := x509.NewCertPool()
+	for _, ca := range trustedCAs {
+		pool.AppendCertsFromPEM([]byte(ca.Cert))
+	}
+	f.OnNewFronts(pool, providers, countryCode)
 }
 
 // OnNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
 // (such as Akamai, Cloudfront, etc)
-func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
+func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider, countryCode string) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
 	log.Debug("Updating fronted configuration")
@@ -109,7 +159,7 @@ func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provide
 		log.Errorf("No providers configured")
 		return
 	}
-	providersCopy := copyProviders(providers)
+	providersCopy := copyProviders(providers, countryCode)
 	f.addProviders(providersCopy)
 	f.addFronts(loadFronts(providersCopy))
 	f.certPool.Store(pool)
@@ -559,10 +609,10 @@ func (f *fronted) isStopped() bool {
 	return f.stopped.Load()
 }
 
-func copyProviders(providers map[string]*Provider) map[string]*Provider {
+func copyProviders(providers map[string]*Provider, countryCode string) map[string]*Provider {
 	providersCopy := make(map[string]*Provider, len(providers))
 	for key, p := range providers {
-		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.Validator, p.PassthroughPatterns, p.SNIConfig, p.VerifyHostname)
+		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, nil, p.PassthroughPatterns, p.FrontingSNIs, p.VerifyHostname, countryCode)
 	}
 	return providersCopy
 }

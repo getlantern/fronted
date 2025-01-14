@@ -10,13 +10,14 @@ import (
 func TestNewProvider(t *testing.T) {
 	verifyHostname := "verifyHostname.com"
 	var tests = []struct {
-		name                string
-		givenHosts          map[string]string
-		givenTestURL        string
-		givenMasquerades    []*Masquerade
-		givenValidator      ResponseValidator
-		givenPassthrough    []string
-		givenSNIConfig      *SNIConfig
+		name             string
+		givenHosts       map[string]string
+		givenTestURL     string
+		givenMasquerades []*Masquerade
+		givenValidator   ResponseValidator
+		givenPassthrough []string
+		//givenSNIConfig      *SNIConfig
+		givenFrontingSNIs   map[string]*SNIConfig
 		givenVerifyHostname *string
 		assert              func(t *testing.T, actual *Provider)
 	}{
@@ -29,8 +30,8 @@ func TestNewProvider(t *testing.T) {
 				assert.Empty(t, actual.Masquerades)
 				assert.Empty(t, actual.PassthroughPatterns)
 				assert.Equal(t, "http://test.com", actual.TestURL)
-				assert.Nil(t, actual.Validator)
-				assert.Nil(t, actual.SNIConfig)
+				//assert.Nil(t, actual.Validator)
+				assert.Nil(t, actual.FrontingSNIs)
 			},
 		},
 		{
@@ -40,9 +41,11 @@ func TestNewProvider(t *testing.T) {
 			givenMasquerades: []*Masquerade{{Domain: "domain1", IpAddress: "127.0.0.1"}},
 			givenValidator:   func(*http.Response) error { return nil },
 			givenPassthrough: []string{"passthrough1", "passthrough2"},
-			givenSNIConfig: &SNIConfig{
-				UseArbitrarySNIs: true,
-				ArbitrarySNIs:    []string{"sni1.com", "sni2.com"},
+			givenFrontingSNIs: map[string]*SNIConfig{
+				"test": &SNIConfig{
+					UseArbitrarySNIs: true,
+					ArbitrarySNIs:    []string{"sni1.com", "sni2.com"},
+				},
 			},
 			givenVerifyHostname: &verifyHostname,
 			assert: func(t *testing.T, actual *Provider) {
@@ -61,7 +64,7 @@ func TestNewProvider(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			actual := NewProvider(tt.givenHosts, tt.givenTestURL, tt.givenMasquerades, tt.givenValidator, tt.givenPassthrough, tt.givenSNIConfig, tt.givenVerifyHostname)
+			actual := NewProvider(tt.givenHosts, tt.givenTestURL, tt.givenMasquerades, tt.givenValidator, tt.givenPassthrough, tt.givenFrontingSNIs, tt.givenVerifyHostname, "test")
 			tt.assert(t, actual)
 		})
 	}

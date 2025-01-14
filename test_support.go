@@ -25,7 +25,7 @@ func ConfigureCachingForTest(t *testing.T, cacheFile string) Fronted {
 	p := testProviders()
 	defaultFrontedProviderID = testProviderID
 	f := NewFronted(cacheFile)
-	f.OnNewFronts(certs, p)
+	f.OnNewFronts(certs, p, "")
 	return f
 }
 
@@ -34,7 +34,7 @@ func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) Fronted 
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
 	f := NewFronted("")
-	f.OnNewFronts(certs, p)
+	f.OnNewFronts(certs, p, "")
 	return f
 }
 
@@ -53,17 +53,20 @@ func trustedCACerts(t *testing.T) *x509.CertPool {
 
 func testProviders() map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades, nil, nil, nil, nil),
+		testProviderID: NewProvider(testHosts, pingTestURL, testMasquerades, nil, nil, nil, nil, ""),
 	}
 }
 
 func testProvidersWithHosts(hosts map[string]string) map[string]*Provider {
 	return map[string]*Provider{
-		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil, nil, nil, nil),
+		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil, nil, nil, nil, ""),
 	}
 }
 func testAkamaiProvidersWithHosts(hosts map[string]string, sniConfig *SNIConfig) map[string]*Provider {
+	frontingSNIs := map[string]*SNIConfig{
+		"test": sniConfig,
+	}
 	return map[string]*Provider{
-		"akamai": NewProvider(hosts, "https://fronted-ping.dsa.akamai.getiantem.org/ping", DefaultAkamaiMasquerades, nil, nil, sniConfig, nil),
+		"akamai": NewProvider(hosts, "https://fronted-ping.dsa.akamai.getiantem.org/ping", DefaultAkamaiMasquerades, nil, nil, frontingSNIs, nil, "test"),
 	}
 }
