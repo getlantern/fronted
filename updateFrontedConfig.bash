@@ -16,7 +16,7 @@ then
         exit 1
     fi
 fi
-cat "trustedcas:" > fronted.yaml
+echo "trustedcas:" > fronted.yaml
 curl https://globalconfig.flashlightproxy.com/global.yaml.gz | gunzip | yq '.trustedcas' >> fronted.yaml
 curl https://globalconfig.flashlightproxy.com/global.yaml.gz | gunzip | yq '.client.fronted' >> fronted.yaml
 git add fronted.yaml
