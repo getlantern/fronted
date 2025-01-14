@@ -2,6 +2,7 @@ package fronted
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/x509"
 	"embed"
@@ -76,7 +77,7 @@ type Fronted interface {
 	Close()
 }
 
-//go:embed fronted.yaml
+//go:embed fronted.yaml.gz
 var embedFS embed.FS
 
 // NewFronted creates a new Fronted instance with the given cache file.
@@ -111,14 +112,24 @@ func NewFronted(cacheFile string) Fronted {
 }
 
 func (f *fronted) readFrontsFromEmbeddedConfig() {
-	yml, err := embedFS.ReadFile("fronted.yaml")
+	yml, err := embedFS.ReadFile("fronted.yaml.gz")
 	if err != nil {
 		slog.Error("Failed to read smart dialer config", "error", err)
 	}
 	f.OnNewFrontsConfig(yml, "")
 }
 
-func (f *fronted) OnNewFrontsConfig(yml []byte, countryCode string) {
+func (f *fronted) OnNewFrontsConfig(compressedYaml []byte, countryCode string) {
+	r, gzipErr := gzip.NewReader(bytes.NewReader(compressedYaml))
+	if gzipErr != nil {
+		slog.Error("Failed to create gzip reader", "error", gzipErr)
+		return
+	}
+	yml, err := io.ReadAll(r)
+	if err != nil {
+		slog.Error("Failed to read gzipped file", "error", err)
+		return
+	}
 	path, err := yaml.PathString("$.providers")
 	if err != nil {
 		slog.Error("Failed to create providers dpath", "error", err)
