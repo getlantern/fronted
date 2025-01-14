@@ -19,6 +19,12 @@ fi
 echo "trustedcas:" > fronted.yaml
 curl https://globalconfig.flashlightproxy.com/global.yaml.gz | gunzip | yq '.trustedcas' >> fronted.yaml
 curl https://globalconfig.flashlightproxy.com/global.yaml.gz | gunzip | yq '.client.fronted' >> fronted.yaml
-git add fronted.yaml
-git commit -m "Update fronted.yaml"
-git push
+
+# If the generated file is different from the current one, commit and push the changes
+if ! git diff --quiet fronted.yaml; then
+    git add fronted.yaml
+    git commit -m "Update fronted.yaml"
+    git push
+else
+    echo "No changes detected in fronted.yaml"
+fi
