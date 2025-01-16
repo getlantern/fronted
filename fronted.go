@@ -70,9 +70,6 @@ type fronted struct {
 	configURL           string
 }
 
-// configURL is the URL from which to continually fetch updated domain fronting configurations.
-const configURL = "https://media.githubusercontent.com/media/getlantern/fronted/refs/heads/main/fronted.yaml.gz"
-
 // Interface for sending HTTP traffic over domain fronting.
 type Fronted interface {
 	http.RoundTripper
@@ -170,24 +167,24 @@ func defaultCacheFilePath() string {
 
 func (f *fronted) keepCurrent() {
 	if f.configURL == "" {
-		slog.Debug("No config URL provided -- not updating fronting configuration")
+		slog.Info("No config URL provided -- not updating fronting configuration")
 		return
 	}
 
-	source := keepcurrent.FromTarGz(
-		keepcurrent.FromWebWithClient(configURL, f.httpClient), "fronted.yaml.gz")
+	slog.Info("Updating fronted configuration from URL", "url", f.configURL)
+	source := keepcurrent.FromWebWithClient(f.configURL, f.httpClient)
 	chDB := make(chan []byte)
 	dest := keepcurrent.ToChannel(chDB)
 
 	runner := keepcurrent.NewWithValidator(
 		f.validator(),
 		source,
-		keepcurrent.ToFile("fronted.yaml.gz"),
 		dest,
 	)
 
 	go func() {
 		for data := range chDB {
+			slog.Info("Received new fronted configuration")
 			f.onNewFrontsConfig(data)
 		}
 	}()
