@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +26,7 @@ import (
 	tls "github.com/refraction-networking/utls"
 
 	"github.com/getlantern/golog"
+	"github.com/getlantern/keepcurrent"
 	"github.com/getlantern/ops"
 
 	"github.com/alitto/pond/v2"
@@ -48,6 +51,7 @@ type fronted struct {
 	fronts              sortedFronts
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
+	cacheFile           string
 	cacheSaveInterval   time.Duration
 	cacheDirty          chan interface{}
 	cacheClosed         chan interface{}
@@ -61,17 +65,23 @@ type fronted struct {
 	stopCh              chan interface{}
 	crawlOnce           sync.Once
 	stopped             atomic.Bool
+	countryCode         string
+	httpClient          *http.Client
+	configURL           string
 }
+
+// configURL is the URL from which to continually fetch updated domain fronting configurations.
+const configURL = "https://media.githubusercontent.com/media/getlantern/fronted/refs/heads/main/fronted.yaml.gz"
 
 // Interface for sending HTTP traffic over domain fronting.
 type Fronted interface {
 	http.RoundTripper
 
-	// OnNewFrontsConfig updates the set of domain fronts to try from a YAML configuration.
-	OnNewFrontsConfig(yml []byte, countryCode string)
+	// onNewFrontsConfig updates the set of domain fronts to try from a YAML configuration.
+	onNewFrontsConfig(yml []byte)
 
-	// OnNewFronts updates the set of domain fronts to try.
-	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider, countryCode string)
+	// onNewFronts updates the set of domain fronts to try.
+	onNewFronts(pool *x509.CertPool, providers map[string]*Provider)
 
 	// Close closes any resources, such as goroutines that are testing fronts.
 	Close()
@@ -80,10 +90,13 @@ type Fronted interface {
 //go:embed fronted.yaml.gz
 var embedFS embed.FS
 
+// Option is a functional option type that allows us to configure the fronted client.
+type Option func(*fronted)
+
 // NewFronted creates a new Fronted instance with the given cache file.
 // At this point it does not have the actual IPs, domains, etc of the fronts to try.
 // defaultProviderID is used when a front without a provider is encountered (eg in a cache file)
-func NewFronted(cacheFile string) Fronted {
+func NewFronted(options ...Option) Fronted {
 	log.Debug("Creating new fronted")
 
 	f := &fronted{
@@ -100,15 +113,96 @@ func NewFronted(cacheFile string) Fronted {
 		connectingFronts:  newConnectingFronts(4000),
 		stopCh:            make(chan interface{}, 10),
 		defaultProviderID: defaultFrontedProviderID,
+		httpClient:        http.DefaultClient,
+		cacheFile:         defaultCacheFilePath(),
+		configURL:         "",
 	}
 
-	if cacheFile != "" {
-		f.initCaching(cacheFile)
+	for _, opt := range options {
+		opt(f)
 	}
 
 	f.readFrontsFromEmbeddedConfig()
+	f.keepCurrent()
 
 	return f
+}
+
+// WithHTTPClient sets the HTTP client to use for fetching the fronted configuration. For example, the client
+// could be censorship-resistant in some way.
+func WithHTTPClient(httpClient *http.Client) Option {
+	return func(f *fronted) {
+		f.httpClient = httpClient
+	}
+}
+
+// WithCacheFile sets the file to use for caching domains that have successfully connected.
+func WithCacheFile(file string) Option {
+	return func(f *fronted) {
+		f.initCaching(file)
+	}
+}
+
+// WithCountryCode sets the country code to use for fronting, which is particularly relevant for the
+// SNI to use when connecting to the fronting domain.
+func WithCountryCode(cc string) Option {
+	return func(f *fronted) {
+		f.countryCode = cc
+	}
+}
+
+// WithConfigURL sets the URL from which to continually fetch updated domain fronting configurations.
+func WithConfigURL(configURL string) Option {
+	return func(f *fronted) {
+		f.configURL = configURL
+	}
+}
+
+func defaultCacheFilePath() string {
+	if dir, err := os.UserConfigDir(); err != nil {
+		log.Errorf("Unable to get user config dir: %v", err)
+		// Use the temporary directory.
+		return filepath.Join(os.TempDir(), "fronted_cache.json")
+	} else {
+		return filepath.Join(dir, "domainfronting", "fronted_cache.json")
+	}
+}
+
+func (f *fronted) keepCurrent() {
+	if f.configURL == "" {
+		slog.Debug("No config URL provided -- not updating fronting configuration")
+		return
+	}
+
+	source := keepcurrent.FromTarGz(
+		keepcurrent.FromWebWithClient(configURL, f.httpClient), "fronted.yaml.gz")
+	chDB := make(chan []byte)
+	dest := keepcurrent.ToChannel(chDB)
+
+	runner := keepcurrent.NewWithValidator(
+		f.validator(),
+		source,
+		keepcurrent.ToFile("fronted.yaml.gz"),
+		dest,
+	)
+
+	go func() {
+		for data := range chDB {
+			f.onNewFrontsConfig(data)
+		}
+	}()
+
+	runner.Start(12 * time.Hour)
+}
+
+func (f *fronted) validator() func([]byte) error {
+	return func(data []byte) error {
+		_, _, err := processYaml(data)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 func (f *fronted) readFrontsFromEmbeddedConfig() {
@@ -116,53 +210,21 @@ func (f *fronted) readFrontsFromEmbeddedConfig() {
 	if err != nil {
 		slog.Error("Failed to read smart dialer config", "error", err)
 	}
-	f.OnNewFrontsConfig(yml, "")
+	f.onNewFrontsConfig(yml)
 }
 
-func (f *fronted) OnNewFrontsConfig(gzippedYaml []byte, countryCode string) {
-	r, gzipErr := gzip.NewReader(bytes.NewReader(gzippedYaml))
-	if gzipErr != nil {
-		slog.Error("Failed to create gzip reader", "error", gzipErr)
-		return
-	}
-	yml, err := io.ReadAll(r)
+func (f *fronted) onNewFrontsConfig(gzippedYaml []byte) {
+	pool, providers, err := processYaml(gzippedYaml)
 	if err != nil {
-		slog.Error("Failed to read gzipped file", "error", err)
+		log.Errorf("Failed to process fronted config: %v", err)
 		return
 	}
-	path, err := yaml.PathString("$.providers")
-	if err != nil {
-		slog.Error("Failed to create providers dpath", "error", err)
-		return
-	}
-	providers := make(map[string]*Provider)
-	pathErr := path.Read(bytes.NewReader(yml), &providers)
-	if pathErr != nil {
-		slog.Error("Failed to read providers", "error", pathErr)
-		return
-	}
-
-	trustedCAsPath, err := yaml.PathString("$.trustedcas")
-	if err != nil {
-		slog.Error("Failed to create trusted CA path", "error", err)
-		return
-	}
-	var trustedCAs []*CA
-	trustedCAsErr := trustedCAsPath.Read(bytes.NewReader(yml), &trustedCAs)
-	if trustedCAsErr != nil {
-		slog.Error("Failed to read trusted CAs", "error", trustedCAsErr)
-		return
-	}
-	pool := x509.NewCertPool()
-	for _, ca := range trustedCAs {
-		pool.AppendCertsFromPEM([]byte(ca.Cert))
-	}
-	f.OnNewFronts(pool, providers, countryCode)
+	f.onNewFronts(pool, providers)
 }
 
-// OnNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
+// onNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
 // (such as Akamai, Cloudfront, etc)
-func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider, countryCode string) {
+func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
 	log.Debug("Updating fronted configuration")
@@ -170,7 +232,7 @@ func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provide
 		log.Errorf("No providers configured")
 		return
 	}
-	providersCopy := copyProviders(providers, countryCode)
+	providersCopy := copyProviders(providers, f.countryCode)
 	f.addProviders(providersCopy)
 	f.addFronts(loadFronts(providersCopy))
 	f.certPool.Store(pool)
@@ -623,7 +685,7 @@ func (f *fronted) isStopped() bool {
 func copyProviders(providers map[string]*Provider, countryCode string) map[string]*Provider {
 	providersCopy := make(map[string]*Provider, len(providers))
 	for key, p := range providers {
-		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, nil, p.PassthroughPatterns, p.FrontingSNIs, p.VerifyHostname, countryCode)
+		providersCopy[key] = NewProvider(p.HostAliases, p.TestURL, p.Masquerades, p.PassthroughPatterns, p.FrontingSNIs, p.VerifyHostname, countryCode)
 	}
 	return providersCopy
 }
@@ -704,4 +766,46 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 	}
 	defer conn.Close()
 	return masq.verifyWithPost(conn, testURL)
+}
+
+func processYaml(gzippedYaml []byte) (*x509.CertPool, map[string]*Provider, error) {
+	r, gzipErr := gzip.NewReader(bytes.NewReader(gzippedYaml))
+	if gzipErr != nil {
+		slog.Error("Failed to create gzip reader", "error", gzipErr)
+		// Wrap the error
+		return nil, nil, fmt.Errorf("failed to create gzip reader: %w", gzipErr)
+	}
+	yml, err := io.ReadAll(r)
+	if err != nil {
+		slog.Error("Failed to read gzipped file", "error", err)
+		return nil, nil, fmt.Errorf("failed to read gzipped file: %w", err)
+	}
+	path, err := yaml.PathString("$.providers")
+	if err != nil {
+		slog.Error("Failed to create providers path", "error", err)
+		return nil, nil, fmt.Errorf("failed to create providers path: %w", err)
+	}
+	providers := make(map[string]*Provider)
+	pathErr := path.Read(bytes.NewReader(yml), &providers)
+	if pathErr != nil {
+		slog.Error("Failed to read providers", "error", pathErr)
+		return nil, nil, fmt.Errorf("failed to read providers: %w", pathErr)
+	}
+
+	trustedCAsPath, err := yaml.PathString("$.trustedcas")
+	if err != nil {
+		slog.Error("Failed to create trusted CA path", "error", err)
+		return nil, nil, fmt.Errorf("failed to create trusted CA path: %w", err)
+	}
+	var trustedCAs []*CA
+	trustedCAsErr := trustedCAsPath.Read(bytes.NewReader(yml), &trustedCAs)
+	if trustedCAsErr != nil {
+		slog.Error("Failed to read trusted CAs", "error", trustedCAsErr)
+		return nil, nil, fmt.Errorf("failed to read trusted CAs: %w", trustedCAsErr)
+	}
+	pool := x509.NewCertPool()
+	for _, ca := range trustedCAs {
+		pool.AppendCertsFromPEM([]byte(ca.Cert))
+	}
+	return pool, providers, nil
 }

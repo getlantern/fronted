@@ -19,27 +19,25 @@ import (
 	"time"
 
 	. "github.com/getlantern/waitforserver"
-	"github.com/goccy/go-yaml"
 	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestYamlParsing(t *testing.T) {
-	// Read fronted.yaml into a map of Provider structs
-	f, err := os.ReadFile("fronted.yaml")
+	// Disable this if we're running in CI because the file is using git lfs and will just be a pointer.
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping test in GitHub Actions because the file is using git lfs and will be a pointer")
+	}
+	yamlFile, err := os.ReadFile("fronted.yaml.gz")
 	require.NoError(t, err)
-	providers := make(map[string]*Provider)
-	err = yaml.Unmarshal(f, &providers)
+	pool, providers, err := processYaml(yamlFile)
 	require.NoError(t, err)
+	require.NotNil(t, pool)
+	require.NotNil(t, providers)
 
-	// Now write out the struct to a new yaml file.
-	f2, err := os.Create("fronted2.yaml")
-	require.NoError(t, err)
-	defer f2.Close()
-	err = yaml.NewEncoder(f2).Encode(providers)
-	require.NoError(t, err)
-
+	// Make sure there are some providers
+	assert.Greater(t, len(providers), 0)
 }
 
 func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
@@ -76,8 +74,8 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
 	defaultFrontedProviderID = "akamai"
-	transport := NewFronted(cacheFile)
-	transport.OnNewFronts(certs, p, "")
+	transport := NewFronted(WithCacheFile(cacheFile))
+	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -104,8 +102,8 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
-	transport := NewFronted(cacheFile)
-	transport.OnNewFronts(certs, p, "")
+	transport := NewFronted(WithCacheFile(cacheFile))
+	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -114,8 +112,8 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
 	defaultFrontedProviderID = testProviderID
-	transport = NewFronted(cacheFile)
-	transport.OnNewFronts(certs, p, "")
+	transport = NewFronted(WithCacheFile(cacheFile))
+	transport.onNewFronts(certs, p)
 	client = &http.Client{
 		Transport: transport,
 	}
@@ -223,15 +221,15 @@ func TestHostAliasesBasic(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil, nil, "")
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil, "")
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
 	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted("")
+	rt := NewFronted()
 
-	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p}, "")
+	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -321,14 +319,14 @@ func TestHostAliasesMulti(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil, nil, "")
+	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil, "")
 
 	masq2 := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
 	}
-	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil, nil, "")
+	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil, "")
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -340,8 +338,8 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted("")
-	rt.OnNewFronts(certs, providers, "")
+	rt := NewFronted()
+	rt.onNewFronts(certs, providers)
 
 	client := &http.Client{Transport: rt}
 
@@ -459,14 +457,14 @@ func TestPassthrough(t *testing.T) {
 	masq := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{}
 	passthrough := []string{"*.ok.cloudsack.biz", "abc.cloudsack.biz"}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough, nil, nil, "")
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, passthrough, nil, nil, "")
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
 	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted("")
-	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p}, "")
+	rt := NewFronted()
+	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -505,141 +503,6 @@ func TestPassthrough(t *testing.T) {
 		assert.EqualError(t, err, test.expectedError)
 		assert.Nil(t, resp)
 
-	}
-}
-
-func TestCustomValidators(t *testing.T) {
-
-	sadCloud, sadCloudAddr, err := newCDN("sadcloud", "sadcloud.io")
-	if !assert.NoError(t, err, "failed to start sadcloud cdn") {
-		return
-	}
-	defer sadCloud.Close()
-
-	sadCloudCodes := []int{http.StatusPaymentRequired, http.StatusTeapot, http.StatusBadGateway}
-	sadCloudValidator := NewStatusCodeValidator(sadCloudCodes)
-	testURL := "https://abc.forbidden.com/quux"
-
-	setup := func(validator ResponseValidator) (Fronted, error) {
-		masq := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
-		alias := map[string]string{
-			"abc.forbidden.com": "abc.sadcloud.io",
-		}
-		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil, nil, nil, "")
-
-		certs := x509.NewCertPool()
-		certs.AddCert(sadCloud.Certificate())
-
-		providers := map[string]*Provider{
-			"sadcloud": p,
-		}
-
-		defaultFrontedProviderID = "sadcloud"
-		f := NewFronted("")
-		f.OnNewFronts(certs, providers, "")
-		return f, nil
-	}
-
-	// This error indicates that the validator has discarded all masquerades.
-	// Each test starts with one masquerade, which is vetted during the
-	// call to NewDirect.
-	masqueradesExhausted := fmt.Sprintf(`Get "%v": could not complete request even with retries`, testURL)
-
-	tests := []struct {
-		name          string
-		responseCode  int
-		validator     ResponseValidator
-		expectedError string
-	}{
-		// with the default validator, only 403s are rejected
-		{
-			name:          "with default validator, it should reject 403",
-			responseCode:  http.StatusForbidden,
-			validator:     nil,
-			expectedError: masqueradesExhausted,
-		},
-		{
-			name:          "with default validator, it should accept 202",
-			responseCode:  http.StatusAccepted,
-			validator:     nil,
-			expectedError: "",
-		},
-		{
-			name:          "with default validator, it should accept 402",
-			responseCode:  http.StatusPaymentRequired,
-			validator:     nil,
-			expectedError: "",
-		},
-		{
-			name:          "with default validator, it should accept 418",
-			responseCode:  http.StatusTeapot,
-			validator:     nil,
-			expectedError: "",
-		},
-		{
-			name:          "with default validator, it should accept 502",
-			responseCode:  http.StatusBadGateway,
-			validator:     nil,
-			expectedError: "",
-		},
-
-		// with the custom validator, 403 is allowed, listed codes are rejected
-		{
-			name:          "with custom validator, it should accept 403",
-			responseCode:  http.StatusForbidden,
-			validator:     sadCloudValidator,
-			expectedError: "",
-		},
-		{
-			name:          "with custom validator, it should accept 402",
-			responseCode:  http.StatusAccepted,
-			validator:     sadCloudValidator,
-			expectedError: "",
-		},
-		{
-			name:          "with custom validator, it should reject and return error for 402",
-			responseCode:  http.StatusPaymentRequired,
-			validator:     sadCloudValidator,
-			expectedError: masqueradesExhausted,
-		},
-		{
-			name:          "with custom validator, it should reject and return error for 418",
-			responseCode:  http.StatusTeapot,
-			validator:     sadCloudValidator,
-			expectedError: masqueradesExhausted,
-		},
-		{
-			name:          "with custom validator, it should reject and return error for 502",
-			responseCode:  http.StatusBadGateway,
-			validator:     sadCloudValidator,
-			expectedError: masqueradesExhausted,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			direct, err := setup(test.validator)
-			require.NoError(t, err)
-			client := &http.Client{
-				Transport: direct,
-			}
-
-			req, err := http.NewRequest(http.MethodGet, testURL, nil)
-			require.NoError(t, err)
-			if test.responseCode != http.StatusAccepted {
-				val := strconv.Itoa(test.responseCode)
-				log.Debugf("requesting forced response code %s", val)
-				req.Header.Set(CDNForceFail, val)
-			}
-
-			res, err := client.Do(req)
-			if test.expectedError == "" {
-				require.NoError(t, err)
-				assert.Equal(t, test.responseCode, res.StatusCode, "Failed to force response status code")
-			} else {
-				assert.EqualError(t, err, test.expectedError)
-			}
-		})
 	}
 }
 
@@ -866,7 +729,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				stopCh:           make(chan interface{}, 10),
 			}
 			f.providers = make(map[string]*Provider)
-			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil, "")
+			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, "")
 			f.fronts = make(sortedFronts, len(tt.masquerades))
 			for i, m := range tt.masquerades {
 				f.fronts[i] = m

@@ -252,7 +252,7 @@ type SNIConfig struct {
 }
 
 // Create a Provider with the given details
-func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, validator ResponseValidator, passthrough []string, frontingSNIs map[string]*SNIConfig, verifyHostname *string, countryCode string) *Provider {
+func NewProvider(hosts map[string]string, testURL string, masquerades []*Masquerade, passthrough []string, frontingSNIs map[string]*SNIConfig, verifyHostname *string, countryCode string) *Provider {
 	p := &Provider{
 		HostAliases:         make(map[string]string),
 		TestURL:             testURL,

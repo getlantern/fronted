@@ -28,6 +28,11 @@ jobs:
       with:
         name: ctrf-report
         path: ctrf-report.json
+    - name: Publish Test Report
+      uses: ctrf-io/github-test-reporter@v1
+      with:
+        report-path: 'ctrf-report.json'
+      if: always()
     - name: Publish Test Summary Results
       run: npx github-actions-ctrf ctrf-report.json
     - name: Install goveralls
