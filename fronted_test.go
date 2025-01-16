@@ -25,6 +25,10 @@ import (
 )
 
 func TestYamlParsing(t *testing.T) {
+	// Disable this if we're running in CI because the file is using git lfs and will just be a pointer.
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping test in GitHub Actions because the file is using git lfs and will be a pointer")
+	}
 	yamlFile, err := os.ReadFile("fronted.yaml.gz")
 	require.NoError(t, err)
 	pool, providers, err := processYaml(yamlFile)
