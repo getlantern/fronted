@@ -25,7 +25,7 @@ func ConfigureCachingForTest(t *testing.T, cacheFile string) Fronted {
 	p := testProviders()
 	defaultFrontedProviderID = testProviderID
 	f := NewFronted(WithCacheFile(cacheFile))
-	f.OnNewFronts(certs, p)
+	f.onNewFronts(certs, p)
 	return f
 }
 
@@ -34,7 +34,7 @@ func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) Fronted 
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
 	f := NewFronted()
-	f.OnNewFronts(certs, p)
+	f.onNewFronts(certs, p)
 	return f
 }
 

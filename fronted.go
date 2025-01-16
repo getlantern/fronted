@@ -77,11 +77,11 @@ const configURL = "https://media.githubusercontent.com/media/getlantern/fronted/
 type Fronted interface {
 	http.RoundTripper
 
-	// OnNewFrontsConfig updates the set of domain fronts to try from a YAML configuration.
-	OnNewFrontsConfig(yml []byte)
+	// onNewFrontsConfig updates the set of domain fronts to try from a YAML configuration.
+	onNewFrontsConfig(yml []byte)
 
-	// OnNewFronts updates the set of domain fronts to try.
-	OnNewFronts(pool *x509.CertPool, providers map[string]*Provider)
+	// onNewFronts updates the set of domain fronts to try.
+	onNewFronts(pool *x509.CertPool, providers map[string]*Provider)
 
 	// Close closes any resources, such as goroutines that are testing fronts.
 	Close()
@@ -188,7 +188,7 @@ func (f *fronted) keepCurrent() {
 
 	go func() {
 		for data := range chDB {
-			f.OnNewFrontsConfig(data)
+			f.onNewFrontsConfig(data)
 		}
 	}()
 
@@ -210,26 +210,21 @@ func (f *fronted) readFrontsFromEmbeddedConfig() {
 	if err != nil {
 		slog.Error("Failed to read smart dialer config", "error", err)
 	}
-	pool, providers, err := processYaml(yml)
-	if err != nil {
-		slog.Error("Failed to process smart dialer config", "error", err)
-		return
-	}
-	f.OnNewFronts(pool, providers)
+	f.onNewFrontsConfig(yml)
 }
 
-func (f *fronted) OnNewFrontsConfig(gzippedYaml []byte) {
+func (f *fronted) onNewFrontsConfig(gzippedYaml []byte) {
 	pool, providers, err := processYaml(gzippedYaml)
 	if err != nil {
 		log.Errorf("Failed to process fronted config: %v", err)
 		return
 	}
-	f.OnNewFronts(pool, providers)
+	f.onNewFronts(pool, providers)
 }
 
-// OnNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
+// onNewFronts sets the domain fronts to use, the trusted root CAs and the fronting providers
 // (such as Akamai, Cloudfront, etc)
-func (f *fronted) OnNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
+func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
 	log.Debug("Updating fronted configuration")

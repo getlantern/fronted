@@ -75,7 +75,7 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 	})
 	defaultFrontedProviderID = "akamai"
 	transport := NewFronted(WithCacheFile(cacheFile))
-	transport.OnNewFronts(certs, p)
+	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -103,7 +103,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
 	transport := NewFronted(WithCacheFile(cacheFile))
-	transport.OnNewFronts(certs, p)
+	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -113,7 +113,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 
 	defaultFrontedProviderID = testProviderID
 	transport = NewFronted(WithCacheFile(cacheFile))
-	transport.OnNewFronts(certs, p)
+	transport.onNewFronts(certs, p)
 	client = &http.Client{
 		Transport: transport,
 	}
@@ -229,7 +229,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	defaultFrontedProviderID = "cloudsack"
 	rt := NewFronted()
 
-	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p})
+	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -339,7 +339,7 @@ func TestHostAliasesMulti(t *testing.T) {
 
 	defaultFrontedProviderID = "cloudsack"
 	rt := NewFronted()
-	rt.OnNewFronts(certs, providers)
+	rt.onNewFronts(certs, providers)
 
 	client := &http.Client{Transport: rt}
 
@@ -464,7 +464,7 @@ func TestPassthrough(t *testing.T) {
 
 	defaultFrontedProviderID = "cloudsack"
 	rt := NewFronted()
-	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p})
+	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
