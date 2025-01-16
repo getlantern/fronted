@@ -19,27 +19,21 @@ import (
 	"time"
 
 	. "github.com/getlantern/waitforserver"
-	"github.com/goccy/go-yaml"
 	tls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestYamlParsing(t *testing.T) {
-	// Read fronted.yaml into a map of Provider structs
-	f, err := os.ReadFile("fronted.yaml")
+	yamlFile, err := os.ReadFile("fronted.yaml.gz")
 	require.NoError(t, err)
-	providers := make(map[string]*Provider)
-	err = yaml.Unmarshal(f, &providers)
+	pool, providers, err := processYaml(yamlFile)
 	require.NoError(t, err)
+	require.NotNil(t, pool)
+	require.NotNil(t, providers)
 
-	// Now write out the struct to a new yaml file.
-	f2, err := os.Create("fronted2.yaml")
-	require.NoError(t, err)
-	defer f2.Close()
-	err = yaml.NewEncoder(f2).Encode(providers)
-	require.NoError(t, err)
-
+	// Make sure there are some providers
+	assert.Greater(t, len(providers), 0)
 }
 
 func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
@@ -76,8 +70,8 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
 	defaultFrontedProviderID = "akamai"
-	transport := NewFronted(cacheFile)
-	transport.OnNewFronts(certs, p, "")
+	transport := NewFronted(WithCacheFile(cacheFile))
+	transport.OnNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -104,8 +98,8 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
-	transport := NewFronted(cacheFile)
-	transport.OnNewFronts(certs, p, "")
+	transport := NewFronted(WithCacheFile(cacheFile))
+	transport.OnNewFronts(certs, p)
 
 	client := &http.Client{
 		Transport: transport,
@@ -114,8 +108,8 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
 	defaultFrontedProviderID = testProviderID
-	transport = NewFronted(cacheFile)
-	transport.OnNewFronts(certs, p, "")
+	transport = NewFronted(WithCacheFile(cacheFile))
+	transport.OnNewFronts(certs, p)
 	client = &http.Client{
 		Transport: transport,
 	}
@@ -223,15 +217,15 @@ func TestHostAliasesBasic(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil, nil, "")
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, nil, nil, "")
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
 	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted("")
+	rt := NewFronted()
 
-	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p}, "")
+	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -321,14 +315,14 @@ func TestHostAliasesMulti(t *testing.T) {
 		"abc.forbidden.com": "abc.cloudsack.biz",
 		"def.forbidden.com": "def.cloudsack.biz",
 	}
-	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil, nil, "")
+	p1 := NewProvider(alias1, "https://ttt.cloudsack.biz/ping", masq1, nil, nil, nil, "")
 
 	masq2 := []*Masquerade{{Domain: "example.com", IpAddress: sadCloudAddr}}
 	alias2 := map[string]string{
 		"abc.forbidden.com": "abc.sadcloud.io",
 		"def.forbidden.com": "def.sadcloud.io",
 	}
-	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil, nil, "")
+	p2 := NewProvider(alias2, "https://ttt.sadcloud.io/ping", masq2, nil, nil, nil, "")
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
@@ -340,8 +334,8 @@ func TestHostAliasesMulti(t *testing.T) {
 	}
 
 	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted("")
-	rt.OnNewFronts(certs, providers, "")
+	rt := NewFronted()
+	rt.OnNewFronts(certs, providers)
 
 	client := &http.Client{Transport: rt}
 
@@ -459,14 +453,14 @@ func TestPassthrough(t *testing.T) {
 	masq := []*Masquerade{{Domain: "example.com", IpAddress: cloudSackAddr}}
 	alias := map[string]string{}
 	passthrough := []string{"*.ok.cloudsack.biz", "abc.cloudsack.biz"}
-	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, nil, passthrough, nil, nil, "")
+	p := NewProvider(alias, "https://ttt.cloudsack.biz/ping", masq, passthrough, nil, nil, "")
 
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
 	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted("")
-	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p}, "")
+	rt := NewFronted()
+	rt.OnNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	client := &http.Client{Transport: rt}
 	for _, test := range tests {
@@ -525,7 +519,7 @@ func TestCustomValidators(t *testing.T) {
 		alias := map[string]string{
 			"abc.forbidden.com": "abc.sadcloud.io",
 		}
-		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, validator, nil, nil, nil, "")
+		p := NewProvider(alias, "https://ttt.sadcloud.io/ping", masq, nil, nil, nil, "")
 
 		certs := x509.NewCertPool()
 		certs.AddCert(sadCloud.Certificate())
@@ -535,8 +529,8 @@ func TestCustomValidators(t *testing.T) {
 		}
 
 		defaultFrontedProviderID = "sadcloud"
-		f := NewFronted("")
-		f.OnNewFronts(certs, providers, "")
+		f := NewFronted()
+		f.OnNewFronts(certs, providers)
 		return f, nil
 	}
 
@@ -866,7 +860,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				stopCh:           make(chan interface{}, 10),
 			}
 			f.providers = make(map[string]*Provider)
-			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, nil, "")
+			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, "")
 			f.fronts = make(sortedFronts, len(tt.masquerades))
 			for i, m := range tt.masquerades {
 				f.fronts[i] = m

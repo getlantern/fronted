@@ -1,7 +1,6 @@
 package fronted
 
 import (
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +13,6 @@ func TestNewProvider(t *testing.T) {
 		givenHosts       map[string]string
 		givenTestURL     string
 		givenMasquerades []*Masquerade
-		givenValidator   ResponseValidator
 		givenPassthrough []string
 		//givenSNIConfig      *SNIConfig
 		givenFrontingSNIs   map[string]*SNIConfig
@@ -39,7 +37,6 @@ func TestNewProvider(t *testing.T) {
 			givenHosts:       map[string]string{"host1": "alias1", "host2": "alias2"},
 			givenTestURL:     "http://test.com",
 			givenMasquerades: []*Masquerade{{Domain: "domain1", IpAddress: "127.0.0.1"}},
-			givenValidator:   func(*http.Response) error { return nil },
 			givenPassthrough: []string{"passthrough1", "passthrough2"},
 			givenFrontingSNIs: map[string]*SNIConfig{
 				"test": &SNIConfig{
@@ -64,7 +61,7 @@ func TestNewProvider(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			actual := NewProvider(tt.givenHosts, tt.givenTestURL, tt.givenMasquerades, tt.givenValidator, tt.givenPassthrough, tt.givenFrontingSNIs, tt.givenVerifyHostname, "test")
+			actual := NewProvider(tt.givenHosts, tt.givenTestURL, tt.givenMasquerades, tt.givenPassthrough, tt.givenFrontingSNIs, tt.givenVerifyHostname, "test")
 			tt.assert(t, actual)
 		})
 	}
