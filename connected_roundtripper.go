@@ -44,7 +44,7 @@ func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	}
 	log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, crt.front.getProviderID())
 
-	reqi, err := cloneRequestWith(req, frontedHost, req.Body)
+	reqi, err := withDomainFront(req, frontedHost, req.Body)
 	if err != nil {
 		return nil, op.FailIf(log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err))
 	}
@@ -88,7 +88,7 @@ func connectedConnHTTPTransport(conn net.Conn, disableKeepAlives bool) http.Roun
 	}
 }
 
-// directTransport is a wrapper struct enabling us to modify the protocol of outgoing
+// connectedTransport is a wrapper struct enabling us to modify the protocol of outgoing
 // requests to make them all HTTP instead of potentially HTTPS, which breaks our particular
 // implemenation of direct domain fronting.
 type connectedTransport struct {
@@ -111,7 +111,7 @@ func (ct *connectedTransport) RoundTrip(req *http.Request) (resp *http.Response,
 	return ct.Transport.RoundTrip(norm)
 }
 
-func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
+func withDomainFront(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
 	urlCopy := *req.URL
 	urlCopy.Host = frontedHost
 	r, err := http.NewRequestWithContext(req.Context(), req.Method, urlCopy.String(), body)
