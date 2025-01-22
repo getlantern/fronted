@@ -95,7 +95,7 @@ type connectedTransport struct {
 	http.Transport
 }
 
-func (ddf *connectedTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+func (ct *connectedTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	defer func(op ops.Op) { op.End() }(ops.Begin("direct_transport_roundtrip"))
 
 	// The connection is already encrypted by domain fronting.  We need to rewrite URLs starting
@@ -108,13 +108,13 @@ func (ddf *connectedTransport) RoundTrip(req *http.Request) (resp *http.Response
 	norm.URL = new(url.URL)
 	*norm.URL = *req.URL
 	norm.URL.Scheme = "http"
-	return ddf.Transport.RoundTrip(norm)
+	return ct.Transport.RoundTrip(norm)
 }
 
 func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
-	url := *req.URL
-	url.Host = frontedHost
-	r, err := http.NewRequestWithContext(req.Context(), req.Method, url.String(), body)
+	urlCopy := *req.URL
+	urlCopy.Host = frontedHost
+	r, err := http.NewRequestWithContext(req.Context(), req.Method, urlCopy.String(), body)
 	if err != nil {
 		return nil, err
 	}
