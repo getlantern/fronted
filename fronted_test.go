@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConfigUpdating(t *testing.T) {
+	NewFronted(
+		WithConfigURL("https://media.githubusercontent.com/media/getlantern/fronted/refs/heads/main/fronted.yaml.gz"),
+		WithCountryCode("cn"),
+	)
+	time.Sleep(10 * time.Second)
+}
 
 func TestYamlParsing(t *testing.T) {
 	// Disable this if we're running in CI because the file is using git lfs and will just be a pointer.
@@ -78,9 +87,14 @@ func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
 	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
-		Transport: transport,
+		Transport: newTransportFromDialer(transport),
 	}
 	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
+}
+
+func newTransportFromDialer(f Fronted) http.RoundTripper {
+	rt, _ := f.NewConnectedRoundTripper(context.Background(), "")
+	return rt
 }
 
 func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {
@@ -105,8 +119,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	transport := NewFronted(WithCacheFile(cacheFile))
 	transport.onNewFronts(certs, p)
 
+	rt := newTransportFromDialer(transport)
 	client := &http.Client{
-		Transport: transport,
+		Transport: rt,
 		Timeout:   5 * time.Second,
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
@@ -115,7 +130,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	transport = NewFronted(WithCacheFile(cacheFile))
 	transport.onNewFronts(certs, p)
 	client = &http.Client{
-		Transport: transport,
+		Transport: newTransportFromDialer(transport),
 	}
 	require.True(t, doCheck(client, http.MethodGet, http.StatusOK, getURL))
 
@@ -230,9 +245,8 @@ func TestHostAliasesBasic(t *testing.T) {
 	rt := NewFronted()
 
 	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
-
-	client := &http.Client{Transport: rt}
 	for _, test := range tests {
+		client := &http.Client{Transport: newTransportFromDialer(rt)}
 		req, err := http.NewRequest(http.MethodGet, test.url, nil)
 		if !assert.NoError(t, err) {
 			return
@@ -264,6 +278,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	}
 
 	for _, test := range errtests {
+		client := &http.Client{Transport: newTransportFromDialer(rt)}
 		resp, err := client.Get(test.url)
 		assert.EqualError(t, err, test.expectedError)
 		assert.Nil(t, resp)
@@ -341,12 +356,11 @@ func TestHostAliasesMulti(t *testing.T) {
 	rt := NewFronted()
 	rt.onNewFronts(certs, providers)
 
-	client := &http.Client{Transport: rt}
-
 	providerCounts := make(map[string]int)
 
 	for i := 0; i < 10; i++ {
 		for _, test := range tests {
+			client := &http.Client{Transport: newTransportFromDialer(rt)}
 			resp, err := client.Get(test.url)
 			if !assert.NoError(t, err, "Request %s failed", test.url) {
 				continue
@@ -466,8 +480,8 @@ func TestPassthrough(t *testing.T) {
 	rt := NewFronted()
 	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
-	client := &http.Client{Transport: rt}
 	for _, test := range tests {
+		client := &http.Client{Transport: newTransportFromDialer(rt)}
 		req, err := http.NewRequest(http.MethodGet, test.url, nil)
 		if !assert.NoError(t, err) {
 			return
@@ -499,6 +513,7 @@ func TestPassthrough(t *testing.T) {
 	}
 
 	for _, test := range errtests {
+		client := &http.Client{Transport: newTransportFromDialer(rt)}
 		resp, err := client.Get(test.url)
 		assert.EqualError(t, err, test.expectedError)
 		assert.Nil(t, resp)
@@ -725,8 +740,8 @@ func TestFindWorkingMasquerades(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fronted{
-				connectingFronts: newConnectingFronts(10),
-				stopCh:           make(chan interface{}, 10),
+				stopCh:   make(chan interface{}, 10),
+				frontsCh: make(chan Front, 10),
 			}
 			f.providers = make(map[string]*Provider)
 			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, "")
@@ -738,12 +753,12 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			f.tryAllFronts()
 
 			tries := 0
-			for f.connectingFronts.size() < tt.expectedSuccessful && tries < 100 {
+			for len(f.frontsCh) < tt.expectedSuccessful && tries < 100 {
 				time.Sleep(30 * time.Millisecond)
 				tries++
 			}
 
-			assert.GreaterOrEqual(t, f.connectingFronts.size(), tt.expectedSuccessful)
+			assert.GreaterOrEqual(t, len(f.frontsCh), tt.expectedSuccessful)
 		})
 	}
 }
@@ -771,7 +786,9 @@ func TestLoadFronts(t *testing.T) {
 		"domain4.com": true,
 	}
 
-	masquerades := loadFronts(providers)
+	// Create the cache dirty channel
+	cacheDirty := make(chan interface{}, 10)
+	masquerades := loadFronts(providers, cacheDirty)
 
 	assert.Equal(t, 4, len(masquerades), "Unexpected number of masquerades loaded")
 
@@ -880,6 +897,20 @@ func (m *mockFront) markFailed() {
 
 // markSucceeded implements MasqueradeInterface.
 func (m *mockFront) markSucceeded() {
+}
+
+// markCacheDirty implements MasqueradeInterface.
+func (m *mockFront) markCacheDirty() {
+}
+
+func (m *mockFront) markWithResult(good bool) bool {
+	if good {
+		m.markSucceeded()
+	} else {
+		m.markFailed()
+	}
+	m.markCacheDirty()
+	return good
 }
 
 // Make sure that the mockMasquerade implements the MasqueradeInterface

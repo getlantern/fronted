@@ -13,7 +13,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,20 +58,21 @@ type fronted struct {
 	defaultProviderID   string
 	providers           map[string]*Provider
 	clientHelloID       tls.ClientHelloID
-	connectingFronts    connectingFronts
-	providersMu         sync.RWMutex
-	frontsMu            sync.RWMutex
-	stopCh              chan interface{}
-	crawlOnce           sync.Once
-	stopped             atomic.Bool
-	countryCode         string
-	httpClient          *http.Client
-	configURL           string
+
+	providersMu sync.RWMutex
+	frontsMu    sync.RWMutex
+	stopCh      chan interface{}
+	crawlOnce   sync.Once
+	stopped     atomic.Bool
+	countryCode string
+	httpClient  *http.Client
+	configURL   string
+	frontsCh    chan Front
 }
 
 // Interface for sending HTTP traffic over domain fronting.
 type Fronted interface {
-	http.RoundTripper
+	NewConnectedRoundTripper(ctx context.Context, addr string) (http.RoundTripper, error)
 
 	// onNewFrontsConfig updates the set of domain fronts to try from a YAML configuration.
 	onNewFrontsConfig(yml []byte)
@@ -107,12 +107,12 @@ func NewFronted(options ...Option) Fronted {
 		providers:           make(map[string]*Provider),
 		// We can and should update this as new ClientHellos become available in utls.
 		clientHelloID:     tls.HelloAndroid_11_OkHttp,
-		connectingFronts:  newConnectingFronts(4000),
 		stopCh:            make(chan interface{}, 10),
 		defaultProviderID: defaultFrontedProviderID,
 		httpClient:        http.DefaultClient,
 		cacheFile:         defaultCacheFilePath(),
 		configURL:         "",
+		frontsCh:          make(chan Front, 4000),
 	}
 
 	for _, opt := range options {
@@ -231,7 +231,7 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	}
 	providersCopy := copyProviders(providers, f.countryCode)
 	f.addProviders(providersCopy)
-	f.addFronts(loadFronts(providersCopy))
+	f.addFronts(loadFronts(providersCopy, f.cacheDirty))
 	f.certPool.Store(pool)
 
 	// The goroutine for finding working fronts runs forever, so only start it once.
@@ -274,6 +274,11 @@ func (f *fronted) findWorkingFronts() {
 	}
 }
 
+// onConnected adds a working front to the channel of working fronts.
+func (f *fronted) onConnected(fr Front) {
+	f.frontsCh <- fr
+}
+
 func (f *fronted) tryAllFronts() {
 	// Find working fronts using a worker pool of goroutines.
 	pool := pond.NewPool(40)
@@ -282,7 +287,6 @@ func (f *fronted) tryAllFronts() {
 	for i := 0; i < f.frontSize(); i++ {
 		m := f.frontAt(i)
 		pool.Submit(func() {
-			// log.Debugf("Running task #%d with front %v", i, m.getIpAddress())
 			if f.isStopped() {
 				return
 			}
@@ -293,7 +297,7 @@ func (f *fronted) tryAllFronts() {
 			}
 			working := f.vetFront(m)
 			if working {
-				f.connectingFronts.onConnected(m)
+				f.onConnected(m)
 			} else {
 				m.markFailed()
 			}
@@ -305,7 +309,7 @@ func (f *fronted) tryAllFronts() {
 }
 
 func (f *fronted) hasEnoughWorkingFronts() bool {
-	return f.connectingFronts.size() >= 4
+	return len(f.frontsCh) >= 4
 }
 
 func (f *fronted) frontSize() int {
@@ -320,8 +324,8 @@ func (f *fronted) frontAt(i int) Front {
 	return f.fronts[i]
 }
 
-func (f *fronted) vetFront(m Front) bool {
-	conn, markWithResult, err := f.dialFront(m)
+func (f *fronted) vetFront(fr Front) bool {
+	conn, err := f.dialFront(fr)
 	if err != nil {
 		log.Debugf("unexpected error vetting masquerades: %v", err)
 		return false
@@ -332,176 +336,74 @@ func (f *fronted) vetFront(m Front) bool {
 		}
 	}()
 
-	provider := f.providerFor(m)
+	provider := f.providerFor(fr)
 	if provider == nil {
 		log.Debugf("Skipping masquerade with disabled/unknown provider id '%s' not in %v",
-			m.getProviderID(), f.providers)
+			fr.getProviderID(), f.providers)
 		return false
 	}
-	if !markWithResult(m.verifyWithPost(conn, provider.TestURL)) {
+	if !fr.markWithResult(fr.verifyWithPost(conn, provider.TestURL)) {
 		log.Debugf("Unsuccessful vetting with POST request, discarding masquerade")
 		return false
 	}
 
-	log.Debugf("Successfully vetted one masquerade %v", m.getIpAddress())
+	log.Debugf("Successfully vetted one masquerade %v", fr.getIpAddress())
 	return true
 }
 
-// RoundTrip loops through all available masquerades, sorted by the one that most recently
-// connected, retrying several times on failures.
-func (f *fronted) RoundTrip(req *http.Request) (*http.Response, error) {
-	res, _, err := f.RoundTripHijack(req)
-	return res, err
+func (f *fronted) NewConnectedRoundTripper(ctx context.Context, addr string) (http.RoundTripper, error) {
+	for i := 0; i < 6; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		// Add a case for the stop channel being called
+		case <-f.stopCh:
+			return nil, errors.New("fronted stopped")
+		case fr := <-f.frontsCh:
+			// The front may have stopped succeeding since we last checked,
+			// so only return it if it's still succeeding.
+			if !fr.isSucceeding() {
+				continue
+			}
+			provider := f.providerFor(fr)
+			if provider == nil {
+				log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", fr.getProviderID())
+				fr.markWithResult(false)
+				continue
+			}
+
+			conn, err := f.dialFront(fr)
+			if err != nil {
+				log.Debugf("Could not dial to %v: %v", fr, err)
+				fr.markWithResult(false)
+				continue
+			}
+			fr.markWithResult(true)
+			// Add the front back to the channel.
+			f.frontsCh <- fr
+
+			return newConnectedRoundTripper(fr, conn, provider), err
+		}
+	}
+	return nil, fmt.Errorf("could not connect to any front")
 }
 
-// RoundTripHijack loops through all available masquerades, sorted by the one that most
-// recently connected, retrying several times on failures.
-func (f *fronted) RoundTripHijack(req *http.Request) (*http.Response, net.Conn, error) {
-	op := ops.Begin("fronted_roundtrip")
-	defer op.End()
-	// If the request has a context, use it. Otherwise, create a new one that has a timeout.
-	if req.Context() == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		req = req.WithContext(ctx)
-	}
-
-	isIdempotent := req.Method != http.MethodPost && req.Method != http.MethodPatch
-	op.Set("is_idempotent", isIdempotent)
-
-	originHost := req.URL.Hostname()
-	op.Set("origin_host", originHost)
-
-	var body []byte
-	var err error
-	if isIdempotent && req.Body != nil {
-		// store body in-memory to be able to replay it if necessary
-		body, err = io.ReadAll(req.Body)
-		if err != nil {
-			err = fmt.Errorf("unable to read request body: %w", err)
-			op.FailIf(err)
-			return nil, nil, err
-		}
-	}
-
-	getBody := func() io.ReadCloser {
-		if req.Body == nil {
-			return nil
-		}
-
-		if !isIdempotent {
-			return req.Body
-		}
-		return io.NopCloser(bytes.NewReader(body))
-	}
-
-	const tries = 6
-
-	for i := 0; i < tries; i++ {
-		if i > 0 {
-			log.Debugf("Retrying domain-fronted request, pass %d", i)
-		}
-
-		m, err := f.connectingFronts.connectingFront(req.Context())
-		if err != nil {
-			// For some reason we have no working fronts. Sleep for a bit and try again.
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		conn, masqueradeGood, err := f.dialFront(m)
-		if err != nil {
-			log.Debugf("Could not dial to %v: %v", m, err)
-			continue
-		}
-
-		resp, conn, err := f.request(req, conn, m, originHost, getBody, masqueradeGood)
-		if err != nil {
-			log.Debugf("Could not complete request: %v", err)
-		} else {
-			return resp, conn, nil
-		}
-	}
-
-	return nil, nil, op.FailIf(errors.New("could not complete request even with retries"))
-}
-
-func (f *fronted) request(req *http.Request, conn net.Conn, m Front, originHost string, getBody func() io.ReadCloser, masqueradeGood func(bool) bool) (*http.Response, net.Conn, error) {
-	op := ops.Begin("fronted_request")
-	defer op.End()
-	provider := f.providerFor(m)
-	if provider == nil {
-		log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", m.getProviderID())
-		masqueradeGood(false)
-		return nil, nil, op.FailIf(log.Errorf("Skipping masquerade with disabled/unknown provider '%s'", m.getProviderID()))
-	}
-	frontedHost := provider.Lookup(originHost)
-	if frontedHost == "" {
-		// this error is not the masquerade's fault in particular
-		// so it is returned as good.
-		conn.Close()
-		masqueradeGood(true)
-		err := fmt.Errorf("no domain fronting mapping for '%s'. Please add it to provider_map.yaml or equivalent for %s",
-			m.getProviderID(), originHost)
-		op.FailIf(err)
-		return nil, nil, err
-	}
-	log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, m.getProviderID())
-
-	reqi, err := cloneRequestWith(req, frontedHost, getBody())
-	if err != nil {
-		return nil, nil, op.FailIf(log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err))
-	}
-	disableKeepAlives := true
-	if strings.EqualFold(reqi.Header.Get("Connection"), "upgrade") {
-		disableKeepAlives = false
-	}
-
-	tr := frontedHTTPTransport(conn, disableKeepAlives)
-	resp, err := tr.RoundTrip(reqi)
-	if err != nil {
-		log.Debugf("Could not complete request: %v", err)
-		masqueradeGood(false)
-		return nil, nil, err
-	}
-
-	err = provider.ValidateResponse(resp)
-	if err != nil {
-		log.Debugf("Could not complete request: %v", err)
-		resp.Body.Close()
-		masqueradeGood(false)
-		return nil, nil, err
-	}
-
-	masqueradeGood(true)
-	return resp, conn, nil
-}
-
-func (f *fronted) dialFront(m Front) (net.Conn, func(bool) bool, error) {
-	log.Tracef("Dialing to %v", m)
+func (f *fronted) dialFront(fr Front) (net.Conn, error) {
+	log.Tracef("Dialing to %v", fr)
 
 	// We do the full TLS connection here because in practice the domains at a given IP
 	// address can change frequently on CDNs, so the certificate may not match what
 	// we expect.
 	start := time.Now()
-	conn, retriable, err := f.doDial(m)
-	markWithResult := func(good bool) bool {
-		if good {
-			m.markSucceeded()
-		} else {
-			m.markFailed()
-		}
-		f.markCacheDirty()
-		return good
-	}
+	conn, retriable, err := f.doDial(fr)
 	if err == nil {
-		log.Debugf("Returning connection for masquerade %v in %v", m.getIpAddress(), time.Since(start))
-		return conn, markWithResult, err
+		log.Debugf("Returning connection for front %v in %v", fr.getIpAddress(), time.Since(start))
+		return conn, err
 	} else if !retriable {
 		log.Debugf("Dropping masquerade: non retryable error: %v", err)
-		markWithResult(false)
+		fr.markWithResult(false)
 	}
-	return conn, markWithResult, err
+	return conn, err
 }
 
 func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
@@ -514,11 +416,14 @@ func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
 	var conn net.Conn
 	var err error
 	retriable := false
-	pool, ok := f.certPool.Load().(*x509.CertPool)
-	if !ok {
-		pool = nil
-	}
 	// A nil cert pool will just use the system's root CAs.
+	pool := f.certPool.Load().(*x509.CertPool)
+	if pool == nil {
+		pool, err = x509.SystemCertPool()
+		if err != nil {
+			return nil, retriable, fmt.Errorf("failed to load system cert pool: %w", err)
+		}
+	}
 	conn, err = m.dial(pool, f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
@@ -607,62 +512,6 @@ func generateVerifyOptions(roots *x509.CertPool, domain string) x509.VerifyOptio
 	}
 }
 
-// frontedHTTPTransport is the transport to use to route to the actual fronted destination domain.
-// This uses the pre-established connection to the CDN on the fronting domain.
-func frontedHTTPTransport(conn net.Conn, disableKeepAlives bool) http.RoundTripper {
-	return &directTransport{
-		Transport: http.Transport{
-			Dial: func(network, addr string) (net.Conn, error) {
-				return conn, nil
-			},
-			TLSHandshakeTimeout: 40 * time.Second,
-			DisableKeepAlives:   disableKeepAlives,
-			IdleConnTimeout:     70 * time.Second,
-		},
-	}
-}
-
-// directTransport is a wrapper struct enabling us to modify the protocol of outgoing
-// requests to make them all HTTP instead of potentially HTTPS, which breaks our particular
-// implemenation of direct domain fronting.
-type directTransport struct {
-	http.Transport
-}
-
-func (ddf *directTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	defer func(op ops.Op) { op.End() }(ops.Begin("direct_transport_roundtrip"))
-
-	// The connection is already encrypted by domain fronting.  We need to rewrite URLs starting
-	// with "https://" to "http://", lest we get an error for doubling up on TLS.
-
-	// The RoundTrip interface requires that we not modify the memory in the request, so we just
-	// create a copy.
-	norm := new(http.Request)
-	*norm = *req // includes shallow copies of maps, but okay
-	norm.URL = new(url.URL)
-	*norm.URL = *req.URL
-	norm.URL.Scheme = "http"
-	return ddf.Transport.RoundTrip(norm)
-}
-
-func cloneRequestWith(req *http.Request, frontedHost string, body io.ReadCloser) (*http.Request, error) {
-	url := *req.URL
-	url.Host = frontedHost
-	r, err := http.NewRequestWithContext(req.Context(), req.Method, url.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	for k, vs := range req.Header {
-		if !strings.EqualFold(k, "Host") {
-			v := make([]string, len(vs))
-			copy(v, vs)
-			r.Header[k] = v
-		}
-	}
-	return r, nil
-}
-
 func randRange(min, max int) int {
 	return rand.IntN(max-min) + min
 }
@@ -687,7 +536,7 @@ func copyProviders(providers map[string]*Provider, countryCode string) map[strin
 	return providersCopy
 }
 
-func loadFronts(providers map[string]*Provider) sortedFronts {
+func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sortedFronts {
 	log.Debugf("Loading candidates for %d providers", len(providers))
 	defer log.Debug("Finished loading candidates")
 
@@ -716,7 +565,7 @@ func loadFronts(providers map[string]*Provider) sortedFronts {
 		}
 
 		for _, c := range sh {
-			fronts[index] = &front{Masquerade: *c, ProviderID: key}
+			fronts[index] = newFront(c, key, cacheDirty)
 			index++
 		}
 	}

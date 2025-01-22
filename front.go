@@ -75,6 +75,10 @@ type Front interface {
 	getProviderID() string
 
 	isSucceeding() bool
+
+	markWithResult(bool) bool
+
+	markCacheDirty()
 }
 
 type front struct {
@@ -84,24 +88,33 @@ type front struct {
 	// id of DirectProvider that this masquerade is provided by
 	ProviderID string
 	mx         sync.RWMutex
+	cacheDirty chan interface{}
 }
 
-func (m *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
+func newFront(m *Masquerade, providerID string, cacheDirty chan interface{}) Front {
+	return &front{
+		Masquerade:    *m,
+		ProviderID:    providerID,
+		LastSucceeded: time.Time{},
+		cacheDirty:    cacheDirty,
+	}
+}
+func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
 	tlsConfig := &tls.Config{
-		ServerName: m.Domain,
+		ServerName: fr.Domain,
 		RootCAs:    rootCAs,
 	}
 	dialTimeout := 5 * time.Second
-	addr := m.IpAddress
+	addr := fr.IpAddress
 	var sendServerNameExtension bool
-	if m.SNI != "" {
+	if fr.SNI != "" {
 		sendServerNameExtension = true
-		tlsConfig.ServerName = m.SNI
+		tlsConfig.ServerName = fr.SNI
 		tlsConfig.InsecureSkipVerify = true
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			var verifyHostname string
-			if m.VerifyHostname != nil {
-				verifyHostname = *m.VerifyHostname
+			if fr.VerifyHostname != nil {
+				verifyHostname = *fr.VerifyHostname
 			}
 			return verifyPeerCertificate(rawCerts, rootCAs, verifyHostname)
 		}
@@ -122,9 +135,9 @@ func (m *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (n
 }
 
 // verifyWithPost does a post with invalid data to verify domain-fronting works
-func (m *front) verifyWithPost(conn net.Conn, testURL string) bool {
+func (fr *front) verifyWithPost(conn net.Conn, testURL string) bool {
 	client := &http.Client{
-		Transport: frontedHTTPTransport(conn, true),
+		Transport: connectedConnHTTPTransport(conn, true),
 	}
 	return doCheck(client, http.MethodPost, http.StatusAccepted, testURL)
 }
@@ -164,57 +177,57 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 }
 
 // getDomain implements MasqueradeInterface.
-func (m *front) getDomain() string {
-	return m.Domain
+func (fr *front) getDomain() string {
+	return fr.Domain
 }
 
 // getIpAddress implements MasqueradeInterface.
-func (m *front) getIpAddress() string {
-	return m.IpAddress
+func (fr *front) getIpAddress() string {
+	return fr.IpAddress
 }
 
 // getProviderID implements MasqueradeInterface.
-func (m *front) getProviderID() string {
-	return m.ProviderID
+func (fr *front) getProviderID() string {
+	return fr.ProviderID
 }
 
 // MarshalJSON marshals masquerade into json
-func (m *front) MarshalJSON() ([]byte, error) {
-	m.mx.RLock()
-	defer m.mx.RUnlock()
+func (fr *front) MarshalJSON() ([]byte, error) {
+	fr.mx.RLock()
+	defer fr.mx.RUnlock()
 	// Type alias for masquerade so that we don't infinitely recurse when marshaling the struct
 	type alias front
-	return json.Marshal((*alias)(m))
+	return json.Marshal((*alias)(fr))
 }
 
-func (m *front) lastSucceeded() time.Time {
-	m.mx.RLock()
-	defer m.mx.RUnlock()
-	return m.LastSucceeded
+func (fr *front) lastSucceeded() time.Time {
+	fr.mx.RLock()
+	defer fr.mx.RUnlock()
+	return fr.LastSucceeded
 }
 
-func (m *front) setLastSucceeded(t time.Time) {
-	m.mx.Lock()
-	defer m.mx.Unlock()
-	m.LastSucceeded = t
+func (fr *front) setLastSucceeded(t time.Time) {
+	fr.mx.Lock()
+	defer fr.mx.Unlock()
+	fr.LastSucceeded = t
 }
 
-func (m *front) markSucceeded() {
-	m.mx.Lock()
-	defer m.mx.Unlock()
-	m.LastSucceeded = time.Now()
+func (fr *front) markSucceeded() {
+	fr.mx.Lock()
+	defer fr.mx.Unlock()
+	fr.LastSucceeded = time.Now()
 }
 
-func (m *front) markFailed() {
-	m.mx.Lock()
-	defer m.mx.Unlock()
-	m.LastSucceeded = time.Time{}
+func (fr *front) markFailed() {
+	fr.mx.Lock()
+	defer fr.mx.Unlock()
+	fr.LastSucceeded = time.Time{}
 }
 
-func (m *front) isSucceeding() bool {
-	m.mx.RLock()
-	defer m.mx.RUnlock()
-	return m.LastSucceeded.After(time.Time{})
+func (fr *front) isSucceeding() bool {
+	fr.mx.RLock()
+	defer fr.mx.RUnlock()
+	return fr.LastSucceeded.After(time.Time{})
 }
 
 // Make sure that the masquerade struct implements the MasqueradeInterface
@@ -367,4 +380,23 @@ func (m sortedFronts) sortedCopy() sortedFronts {
 	copy(c, m)
 	sort.Sort(c)
 	return c
+}
+
+func (fr *front) markCacheDirty() {
+	select {
+	case fr.cacheDirty <- nil:
+		// okay
+	default:
+		// already dirty
+	}
+}
+
+func (fr *front) markWithResult(good bool) bool {
+	if good {
+		fr.markSucceeded()
+	} else {
+		fr.markFailed()
+	}
+	fr.markCacheDirty()
+	return good
 }
