@@ -44,9 +44,9 @@ func TestCaching(t *testing.T) {
 	}
 
 	now := time.Now()
-	mb := &front{Masquerade: Masquerade{Domain: "b", IpAddress: "2"}, LastSucceeded: now, ProviderID: testProviderID}
-	mc := &front{Masquerade: Masquerade{Domain: "c", IpAddress: "3"}, LastSucceeded: now, ProviderID: ""}         // defaulted
-	md := &front{Masquerade: Masquerade{Domain: "d", IpAddress: "4"}, LastSucceeded: now, ProviderID: "sadcloud"} // skipped
+	mb := &front{Masquerade: Masquerade{Domain: "b", IpAddress: "2"}, LastSucceeded: now, providerID: testProviderID}
+	mc := &front{Masquerade: Masquerade{Domain: "c", IpAddress: "3"}, LastSucceeded: now, providerID: ""}         // defaulted
+	md := &front{Masquerade: Masquerade{Domain: "d", IpAddress: "4"}, LastSucceeded: now, providerID: "sadcloud"} // skipped
 
 	f := makeFronted()
 
@@ -80,7 +80,7 @@ func TestCaching(t *testing.T) {
 	for i, expected := range []*front{mb, mc, md} {
 		require.Equal(t, expected.Domain, masquerades[i].Domain, "Wrong masquerade at position %d", i)
 		require.Equal(t, expected.IpAddress, masquerades[i].IpAddress, "Masquerade at position %d has wrong IpAddress", 0)
-		require.Equal(t, expected.ProviderID, masquerades[i].ProviderID, "Masquerade at position %d has wrong ProviderID", 0)
+		require.Equal(t, expected.providerID, masquerades[i].providerID, "Masquerade at position %d has wrong ProviderID", 0)
 		require.Equal(t, now.Unix(), masquerades[i].LastSucceeded.Unix(), "Masquerade at position %d has wrong LastSucceeded", 0)
 	}
 	f.Close()
