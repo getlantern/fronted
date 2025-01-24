@@ -26,11 +26,27 @@ import (
 )
 
 func TestConfigUpdating(t *testing.T) {
-	NewFronted(
+	f := NewFronted(
 		WithConfigURL("https://media.githubusercontent.com/media/getlantern/fronted/refs/heads/main/fronted.yaml.gz"),
 		WithCountryCode("cn"),
 	)
-	time.Sleep(10 * time.Second)
+	time.Sleep(1 * time.Second)
+
+	// Try to hit raw.githubusercontent.com
+	rt, err := f.NewConnectedRoundTripper(context.Background(), "")
+	require.NoError(t, err)
+	client := &http.Client{
+		Transport: rt,
+	}
+	resp, err := client.Get("https://raw.githubusercontent.com/getlantern/fronted/main/fronted.yaml.gz")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Read the full response body
+	bod, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Greater(t, len(bod), 0)
+	resp.Body.Close()
 }
 
 func TestYamlParsing(t *testing.T) {
