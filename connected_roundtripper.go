@@ -30,6 +30,9 @@ func newConnectedRoundTripper(fr Front, conn net.Conn, provider *Provider) conne
 func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	op := ops.Begin("fronted_request")
 	defer op.End()
+	ctx, span := tracer.Start(req.Context(), "frontRoundTrip")
+	defer span.End()
+	req = req.WithContext(ctx)
 	originHost := req.URL.Hostname()
 	frontedHost := crt.provider.Lookup(originHost)
 	if frontedHost == "" {
@@ -70,6 +73,7 @@ func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	}
 
 	crt.front.markWithResult(true)
+	log.Debug("Request completed successfully")
 	return resp, nil
 }
 
@@ -81,7 +85,7 @@ func connectedConnHTTPTransport(conn net.Conn, disableKeepAlives bool) http.Roun
 			Dial: func(network, addr string) (net.Conn, error) {
 				return conn, nil
 			},
-			TLSHandshakeTimeout: 40 * time.Second,
+			TLSHandshakeTimeout: 20 * time.Second,
 			DisableKeepAlives:   disableKeepAlives,
 			IdleConnTimeout:     70 * time.Second,
 		},

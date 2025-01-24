@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	tls "github.com/refraction-networking/utls"
+	"go.opentelemetry.io/otel"
 
 	"github.com/getlantern/golog"
 	"github.com/getlantern/keepcurrent"
@@ -41,6 +41,7 @@ const (
 var (
 	log                      = golog.LoggerFor("fronted")
 	defaultFrontedProviderID = "cloudfront"
+	tracer                   = otel.Tracer("fronted")
 )
 
 // fronted identifies working IP address/domain pairings for domain fronting and is
@@ -165,13 +166,15 @@ func defaultCacheFilePath() string {
 	}
 }
 
+// keepCurrent fetches the fronted configuration from the given URL and keeps it up
+// to date by fetching it periodically.
 func (f *fronted) keepCurrent() {
 	if f.configURL == "" {
-		slog.Info("No config URL provided -- not updating fronting configuration")
+		log.Debug("No config URL provided -- not updating fronting configuration")
 		return
 	}
 
-	slog.Info("Updating fronted configuration from URL", "url", f.configURL)
+	log.Debugf("Updating fronted configuration from URL %v", f.configURL)
 	source := keepcurrent.FromWebWithClient(f.configURL, f.httpClient)
 	chDB := make(chan []byte)
 	dest := keepcurrent.ToChannel(chDB)
@@ -184,7 +187,7 @@ func (f *fronted) keepCurrent() {
 
 	go func() {
 		for data := range chDB {
-			slog.Info("Received new fronted configuration")
+			log.Debug("Received new fronted configuration")
 			f.onNewFrontsConfig(data)
 		}
 	}()
@@ -205,7 +208,8 @@ func (f *fronted) validator() func([]byte) error {
 func (f *fronted) readFrontsFromEmbeddedConfig() {
 	yml, err := embedFS.ReadFile("fronted.yaml.gz")
 	if err != nil {
-		slog.Error("Failed to read smart dialer config", "error", err)
+		log.Debugf("Failed to read smart dialer config %v", err)
+		return
 	}
 	f.onNewFrontsConfig(yml)
 }
@@ -352,6 +356,8 @@ func (f *fronted) vetFront(fr Front) bool {
 }
 
 func (f *fronted) NewConnectedRoundTripper(ctx context.Context, addr string) (http.RoundTripper, error) {
+	ctx, span := tracer.Start(ctx, "NewConnectedRoundTripper")
+	defer span.End()
 	for i := 0; i < 6; i++ {
 		select {
 		case <-ctx.Done():
@@ -406,30 +412,30 @@ func (f *fronted) dialFront(fr Front) (net.Conn, error) {
 	return conn, err
 }
 
-func (f *fronted) doDial(m Front) (net.Conn, bool, error) {
+func (f *fronted) doDial(fr Front) (net.Conn, bool, error) {
 	op := ops.Begin("dial_masquerade")
 	defer op.End()
-	op.Set("masquerade_domain", m.getDomain())
-	op.Set("masquerade_ip", m.getIpAddress())
-	op.Set("masquerade_provider", m.getProviderID())
+	op.Set("masquerade_domain", fr.getDomain())
+	op.Set("masquerade_ip", fr.getIpAddress())
+	op.Set("masquerade_provider", fr.getProviderID())
 
 	var conn net.Conn
 	var err error
 	retriable := false
 	// A nil cert pool will just use the system's root CAs.
-	pool := f.certPool.Load().(*x509.CertPool)
-	if pool == nil {
+	pool, typeCorrect := f.certPool.Load().(*x509.CertPool)
+	if !typeCorrect || pool == nil {
 		pool, err = x509.SystemCertPool()
 		if err != nil {
 			return nil, retriable, fmt.Errorf("failed to load system cert pool: %w", err)
 		}
 	}
-	conn, err = m.dial(pool, f.clientHelloID)
+	conn, err = fr.dial(pool, f.clientHelloID)
 	if err != nil {
 		if !isNetworkUnreachable(err) {
 			op.FailIf(err)
 		}
-		log.Debugf("Could not dial to %v, %v", m.getIpAddress(), err)
+		log.Debugf("Could not dial to %v, %v", fr.getIpAddress(), err)
 		// Don't re-add this candidate if it's any certificate error, as that
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
@@ -617,36 +623,36 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 func processYaml(gzippedYaml []byte) (*x509.CertPool, map[string]*Provider, error) {
 	r, gzipErr := gzip.NewReader(bytes.NewReader(gzippedYaml))
 	if gzipErr != nil {
-		slog.Error("Failed to create gzip reader", "error", gzipErr)
+		log.Errorf("Failed to create gzip reader %v", gzipErr)
 		// Wrap the error
 		return nil, nil, fmt.Errorf("failed to create gzip reader: %w", gzipErr)
 	}
 	yml, err := io.ReadAll(r)
 	if err != nil {
-		slog.Error("Failed to read gzipped file", "error", err)
+		log.Errorf("Failed to read gzipped file %v", err)
 		return nil, nil, fmt.Errorf("failed to read gzipped file: %w", err)
 	}
 	path, err := yaml.PathString("$.providers")
 	if err != nil {
-		slog.Error("Failed to create providers path", "error", err)
+		log.Errorf("Failed to create providers path %v", err)
 		return nil, nil, fmt.Errorf("failed to create providers path: %w", err)
 	}
 	providers := make(map[string]*Provider)
 	pathErr := path.Read(bytes.NewReader(yml), &providers)
 	if pathErr != nil {
-		slog.Error("Failed to read providers", "error", pathErr)
+		log.Errorf("Failed to read providers %v", pathErr)
 		return nil, nil, fmt.Errorf("failed to read providers: %w", pathErr)
 	}
 
 	trustedCAsPath, err := yaml.PathString("$.trustedcas")
 	if err != nil {
-		slog.Error("Failed to create trusted CA path", "error", err)
+		log.Errorf("Failed to create trusted CA path %v", err)
 		return nil, nil, fmt.Errorf("failed to create trusted CA path: %w", err)
 	}
 	var trustedCAs []*CA
 	trustedCAsErr := trustedCAsPath.Read(bytes.NewReader(yml), &trustedCAs)
 	if trustedCAsErr != nil {
-		slog.Error("Failed to read trusted CAs", "error", trustedCAsErr)
+		log.Errorf("Failed to read trusted CAs %v", trustedCAsErr)
 		return nil, nil, fmt.Errorf("failed to read trusted CAs: %w", trustedCAsErr)
 	}
 	pool := x509.NewCertPool()
