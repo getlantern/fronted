@@ -93,7 +93,6 @@ func withDomainFront(req *http.Request, frontedHost string) *http.Request {
 	newReq := req.Clone(req.Context())
 	newReq.URL.Scheme = "http"
 	newReq.URL.Host = frontedHost
-	newReq.Host = frontedHost
 
 	return newReq
 }
