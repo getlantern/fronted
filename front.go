@@ -85,15 +85,16 @@ type front struct {
 	Masquerade
 	// lastSucceeded: the most recent time at which this Masquerade succeeded
 	LastSucceeded time.Time
-	providerID    string
-	mx            sync.RWMutex
-	cacheDirty    chan interface{}
+	// id of DirectProvider that this masquerade is provided by
+	ProviderID string
+	mx         sync.RWMutex
+	cacheDirty chan interface{}
 }
 
 func newFront(m *Masquerade, providerID string, cacheDirty chan interface{}) Front {
 	return &front{
 		Masquerade:    *m,
-		providerID:    providerID,
+		ProviderID:    providerID,
 		LastSucceeded: time.Time{},
 		cacheDirty:    cacheDirty,
 	}
@@ -103,9 +104,6 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 		ServerName: fr.Domain,
 		RootCAs:    rootCAs,
 	}
-
-	// Set a fairly aggressive dial timeout based on observed timeouts running
-	// pinger in censored regions.
 	dialTimeout := 5 * time.Second
 	addr := fr.IpAddress
 	var sendServerNameExtension bool
@@ -178,19 +176,19 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	return true
 }
 
-// getDomain implements Front.
+// getDomain implements MasqueradeInterface.
 func (fr *front) getDomain() string {
 	return fr.Domain
 }
 
-// getIpAddress implements Front.
+// getIpAddress implements MasqueradeInterface.
 func (fr *front) getIpAddress() string {
 	return fr.IpAddress
 }
 
-// getProviderID implements Front.
+// getProviderID implements MasqueradeInterface.
 func (fr *front) getProviderID() string {
-	return fr.providerID
+	return fr.ProviderID
 }
 
 // MarshalJSON marshals masquerade into json
