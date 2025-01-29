@@ -351,7 +351,6 @@ func (f *fronted) vetFront(fr Front) bool {
 		return false
 	}
 
-	log.Debugf("Successfully vetted one masquerade %v", fr.getIpAddress())
 	return true
 }
 
@@ -400,10 +399,8 @@ func (f *fronted) dialFront(fr Front) (net.Conn, error) {
 	// We do the full TLS connection here because in practice the domains at a given IP
 	// address can change frequently on CDNs, so the certificate may not match what
 	// we expect.
-	start := time.Now()
 	conn, retriable, err := f.doDial(fr)
 	if err == nil {
-		log.Debugf("Returning connection for front %v in %v", fr.getIpAddress(), time.Since(start))
 		return conn, err
 	} else if !retriable {
 		log.Debugf("Dropping masquerade: non retryable error: %v", err)
