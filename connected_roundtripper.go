@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -73,15 +74,27 @@ func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 
 // connectedConnHTTPTransport uses a preconnected connection to the CDN to make HTTP requests.
 // This uses the pre-established connection to the CDN on the fronting domain.
-func connectedConnHTTPTransport(conn net.Conn, disableKeepAlives bool) *http.Transport {
-	return &http.Transport{
-		Dial: func(network, addr string) (net.Conn, error) {
-			return conn, nil
+func connectedConnHTTPTransport(conn net.Conn, disableKeepAlives bool) http.RoundTripper {
+	return &connectedTransport{
+		Transport: http.Transport{
+			Dial: func(network, addr string) (net.Conn, error) {
+				return conn, nil
+			},
+			TLSHandshakeTimeout: 20 * time.Second,
+			DisableKeepAlives:   disableKeepAlives,
+			IdleConnTimeout:     70 * time.Second,
 		},
-		TLSHandshakeTimeout: 20 * time.Second,
-		DisableKeepAlives:   disableKeepAlives,
-		IdleConnTimeout:     70 * time.Second,
 	}
+	/*
+		return &http.Transport{
+			Dial: func(network, addr string) (net.Conn, error) {
+				return conn, nil
+			},
+			TLSHandshakeTimeout: 20 * time.Second,
+			DisableKeepAlives:   disableKeepAlives,
+			IdleConnTimeout:     70 * time.Second,
+		}
+	*/
 }
 
 func withDomainFront(req *http.Request, frontedHost string) *http.Request {
@@ -95,4 +108,45 @@ func withDomainFront(req *http.Request, frontedHost string) *http.Request {
 	newReq.URL.Host = frontedHost
 
 	return newReq
+}
+
+/*
+func withDomainFront(req *http.Request, frontedHost string) (*http.Request, error) {
+	urlCopy := *req.URL
+	urlCopy.Host = frontedHost
+	r, err := http.NewRequestWithContext(req.Context(), req.Method, urlCopy.String(), req.Body)
+	if err != nil {
+		return nil, err
+	}
+	for k, vs := range req.Header {
+		if !strings.EqualFold(k, "Host") {
+			v := make([]string, len(vs))
+			copy(v, vs)
+			r.Header[k] = v
+		}
+	}
+	return r, nil
+}
+*/
+
+// connectedTransport is a wrapper struct enabling us to modify the protocol of outgoing
+// requests to make them all HTTP instead of potentially HTTPS, which breaks our particular
+// implemenation of direct domain fronting.
+type connectedTransport struct {
+	http.Transport
+}
+
+func (ct *connectedTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	defer func(op ops.Op) { op.End() }(ops.Begin("direct_transport_roundtrip"))
+	// The connection is already encrypted by domain fronting.  We need to rewrite URLs starting
+	// with "https://" to "http://", lest we get an error for doubling up on TLS.
+
+	// The RoundTrip interface requires that we not modify the memory in the request, so we just
+	// create a copy.
+	norm := new(http.Request)
+	*norm = *req // includes shallow copies of maps, but okay
+	norm.URL = new(url.URL)
+	*norm.URL = *req.URL
+	norm.URL.Scheme = "http"
+	return ct.Transport.RoundTrip(norm)
 }
