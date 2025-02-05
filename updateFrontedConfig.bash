@@ -16,6 +16,9 @@ then
         exit 1
     fi
 fi
+
+cd ../lantern-binaries
+echo `pwd`
 echo "trustedcas:" > fronted.yaml
 curl https://globalconfig.flashlightproxy.com/global.yaml.gz | gunzip | yq '.trustedcas' >> fronted.yaml
 curl https://globalconfig.flashlightproxy.com/global.yaml.gz | gunzip | yq '.client.fronted' >> fronted.yaml
