@@ -85,6 +85,7 @@ type Fronted interface {
 	Close()
 }
 
+//go:generate ./download_config.sh
 //go:embed fronted.yaml.gz
 var embedFS embed.FS
 
