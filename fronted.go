@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,15 +61,16 @@ type fronted struct {
 	providers           map[string]*Provider
 	clientHelloID       tls.ClientHelloID
 
-	providersMu sync.RWMutex
-	frontsMu    sync.RWMutex
-	stopCh      chan interface{}
-	crawlOnce   sync.Once
-	stopped     atomic.Bool
-	countryCode string
-	httpClient  *http.Client
-	configURL   string
-	frontsCh    chan Front
+	providersMu   sync.RWMutex
+	frontsMu      sync.RWMutex
+	stopCh        chan interface{}
+	crawlOnce     sync.Once
+	stopped       atomic.Bool
+	countryCode   string
+	httpClient    *http.Client
+	configURL     string
+	frontsCh      chan Front
+	panicListener func(string)
 }
 
 // Interface for sending HTTP traffic over domain fronting.
@@ -115,6 +117,7 @@ func NewFronted(options ...Option) Fronted {
 		cacheFile:         defaultCacheFilePath(),
 		configURL:         "",
 		frontsCh:          make(chan Front, 4000),
+		panicListener:     func(msg string) { log.Errorf("Panic in fronted: %v", msg) },
 	}
 
 	for _, opt := range options {
@@ -157,6 +160,12 @@ func WithConfigURL(configURL string) Option {
 	}
 }
 
+func WithPanicListener(panicListener func(string)) Option {
+	return func(f *fronted) {
+		f.panicListener = panicListener
+	}
+}
+
 func defaultCacheFilePath() string {
 	if dir, err := os.UserConfigDir(); err != nil {
 		log.Errorf("Unable to get user config dir: %v", err)
@@ -187,6 +196,12 @@ func (f *fronted) keepCurrent() {
 	)
 
 	go func() {
+		// Recover from panics and log them
+		defer func() {
+			if r := recover(); r != nil {
+				f.panicListener(fmt.Sprintf("Panic waiting for fronts %v with stack: %v", r, debug.Stack()))
+			}
+		}()
 		for data := range chDB {
 			log.Debug("Received new fronted configuration")
 			f.onNewFrontsConfig(data)
@@ -241,7 +256,14 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 
 	// The goroutine for finding working fronts runs forever, so only start it once.
 	f.crawlOnce.Do(func() {
-		go f.findWorkingFronts()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					f.panicListener(fmt.Sprintf("Panic finding working fronts %v with stack: %v", r, debug.Stack()))
+				}
+			}()
+			f.findWorkingFronts()
+		}()
 	})
 }
 
@@ -607,6 +629,7 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 		certPool:            atomic.Value{},
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
+		panicListener:       func(msg string) { log.Errorf("Panic in fronted: %v", msg) },
 	}
 	d.certPool.Store(pool)
 	masq := &front{Masquerade: *m}
