@@ -160,6 +160,7 @@ func WithConfigURL(configURL string) Option {
 	}
 }
 
+// WithPanicListener sets a listener for panics that occur in the fronted.
 func WithPanicListener(panicListener func(string)) Option {
 	return func(f *fronted) {
 		f.panicListener = panicListener
@@ -170,10 +171,18 @@ func defaultCacheFilePath() string {
 	if dir, err := os.UserConfigDir(); err != nil {
 		log.Errorf("Unable to get user config dir: %v", err)
 		// Use the temporary directory.
-		return filepath.Join(os.TempDir(), "fronted_cache.json")
+		return mkdirall(os.TempDir(), "fronted_cache.json")
 	} else {
-		return filepath.Join(dir, "domainfronting", "fronted_cache.json")
+		return mkdirall(filepath.Join(dir, "domainfronting", "fronted_cache.json"))
 	}
+}
+
+func mkdirall(paths ...string) string {
+	path := filepath.Join(paths...)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		log.Errorf("Unable to create directory %v: %v", path, err)
+	}
+	return path
 }
 
 // keepCurrent fetches the fronted configuration from the given URL and keeps it up
