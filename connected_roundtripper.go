@@ -66,7 +66,7 @@ func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 
 	err = crt.provider.ValidateResponse(resp)
 	if err != nil {
-		log.Debugf("Could not complete request: %v", err)
+		log.Debugf("Response did not validate for origin %s -> %s for provider %s with error: %v", originHost, frontedHost, crt.front.getProviderID(), err)
 		resp.Body.Close()
 		crt.front.markWithResult(false)
 		return nil, err
