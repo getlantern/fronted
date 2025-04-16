@@ -320,7 +320,7 @@ func (f *fronted) tryAllFronts() {
 	pool := pond.NewPool(40)
 
 	// Submit all fronts to the worker pool.
-	for i := 0; i < f.frontSize(); i++ {
+	for i := range f.frontSize() {
 		m := f.frontAt(i)
 		pool.Submit(func() {
 			if f.isStopped() {
@@ -349,14 +349,14 @@ func (f *fronted) hasEnoughWorkingFronts() bool {
 }
 
 func (f *fronted) frontSize() int {
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
+	f.frontsMu.RLock()
+	defer f.frontsMu.RUnlock()
 	return len(f.fronts)
 }
 
 func (f *fronted) frontAt(i int) Front {
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
+	f.frontsMu.RLock()
+	defer f.frontsMu.RUnlock()
 	return f.fronts[i]
 }
 
@@ -593,7 +593,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sor
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
 		sh := make([]*Masquerade, size)
-		for i := 0; i < size; i++ {
+		for i := range size {
 			j := rand.IntN(i + 1) // 0 <= j <= i
 			sh[i] = sh[j]
 			sh[j] = arr[i]
@@ -620,7 +620,7 @@ func (f *fronted) addFronts(fronts sortedFronts) {
 	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
 	f.frontsMu.Lock()
 	defer f.frontsMu.Unlock()
-	f.fronts = append(fronts, f.fronts...)
+	f.fronts = append(fronts, f.fronts.sortedCopy()...)
 }
 
 func (f *fronted) providerFor(m Front) *Provider {
