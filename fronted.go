@@ -260,7 +260,7 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	}
 	providersCopy := copyProviders(providers, f.countryCode)
 	f.addProviders(providersCopy)
-	f.addFronts(loadFronts(providersCopy, f.cacheDirty))
+	f.fronts.addFronts(loadFronts(providersCopy, f.cacheDirty))
 	f.certPool.Store(pool)
 
 	// The goroutine for finding working fronts runs forever, so only start it once.
@@ -320,8 +320,8 @@ func (f *fronted) tryAllFronts() {
 	pool := pond.NewPool(40)
 
 	// Submit all fronts to the worker pool.
-	for i := 0; i < f.frontSize(); i++ {
-		m := f.frontAt(i)
+	for i := 0; i < f.fronts.size(); i++ {
+		m := f.fronts.frontAt(i)
 		pool.Submit(func() {
 			if f.isStopped() {
 				return
@@ -346,18 +346,6 @@ func (f *fronted) tryAllFronts() {
 
 func (f *fronted) hasEnoughWorkingFronts() bool {
 	return len(f.frontsCh) >= 4
-}
-
-func (f *fronted) frontSize() int {
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
-	return len(f.fronts)
-}
-
-func (f *fronted) frontAt(i int) Front {
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
-	return f.fronts[i]
 }
 
 func (f *fronted) vetFront(fr Front) bool {
@@ -614,13 +602,6 @@ func (f *fronted) addProviders(providers map[string]*Provider) {
 	for key, p := range providers {
 		f.providers[key] = p
 	}
-}
-
-func (f *fronted) addFronts(fronts sortedFronts) {
-	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
-	f.fronts = append(fronts, f.fronts...)
 }
 
 func (f *fronted) providerFor(m Front) *Provider {
