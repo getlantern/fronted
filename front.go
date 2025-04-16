@@ -360,6 +360,45 @@ func NewStatusCodeValidator(reject []int) ResponseValidator {
 	}
 }
 
+type threadSafeFronts struct {
+	fronts sortedFronts
+	mx     sync.RWMutex
+}
+
+func newThreadSafeFronts(size int) *threadSafeFronts {
+	return &threadSafeFronts{
+		fronts: make(sortedFronts, 0, size),
+		mx:     sync.RWMutex{},
+	}
+}
+
+func (tsf *threadSafeFronts) sortedCopy() sortedFronts {
+	tsf.mx.RLock()
+	defer tsf.mx.RUnlock()
+	c := make(sortedFronts, len(tsf.fronts))
+	copy(c, tsf.fronts)
+	sort.Sort(c)
+	return c
+}
+
+func (tsf *threadSafeFronts) addFronts(newFronts ...Front) {
+	tsf.mx.Lock()
+	defer tsf.mx.Unlock()
+	tsf.fronts = append(tsf.fronts, newFronts...)
+}
+
+func (tsf *threadSafeFronts) frontSize() int {
+	tsf.mx.RLock()
+	defer tsf.mx.RUnlock()
+	return len(tsf.fronts)
+}
+
+func (tsf *threadSafeFronts) frontAt(i int) Front {
+	tsf.mx.RLock()
+	defer tsf.mx.RUnlock()
+	return tsf.fronts[i]
+}
+
 // slice of masquerade sorted by last vetted time
 type sortedFronts []Front
 
@@ -373,13 +412,6 @@ func (m sortedFronts) Less(i, j int) bool {
 	} else {
 		return m[i].getIpAddress() < m[j].getIpAddress()
 	}
-}
-
-func (m sortedFronts) sortedCopy() sortedFronts {
-	c := make(sortedFronts, len(m))
-	copy(c, m)
-	sort.Sort(c)
-	return c
 }
 
 func (fr *front) markCacheDirty() {

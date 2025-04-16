@@ -49,7 +49,7 @@ var (
 // an implementation of http.RoundTripper for the convenience of callers.
 type fronted struct {
 	certPool            atomic.Value
-	fronts              sortedFronts
+	fronts              *threadSafeFronts
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
 	cacheFile           string
@@ -102,7 +102,7 @@ func NewFronted(options ...Option) Fronted {
 
 	f := &fronted{
 		certPool:            atomic.Value{},
-		fronts:              make(sortedFronts, 0),
+		fronts:              newThreadSafeFronts(0),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
@@ -260,7 +260,7 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	}
 	providersCopy := copyProviders(providers, f.countryCode)
 	f.addProviders(providersCopy)
-	f.addFronts(loadFronts(providersCopy, f.cacheDirty))
+	f.fronts.addFronts(loadFronts(providersCopy, f.cacheDirty)...)
 	f.certPool.Store(pool)
 
 	// The goroutine for finding working fronts runs forever, so only start it once.
@@ -320,8 +320,8 @@ func (f *fronted) tryAllFronts() {
 	pool := pond.NewPool(40)
 
 	// Submit all fronts to the worker pool.
-	for i := range f.frontSize() {
-		m := f.frontAt(i)
+	for i := range f.fronts.frontSize() {
+		m := f.fronts.frontAt(i)
 		pool.Submit(func() {
 			if f.isStopped() {
 				return
@@ -346,18 +346,6 @@ func (f *fronted) tryAllFronts() {
 
 func (f *fronted) hasEnoughWorkingFronts() bool {
 	return len(f.frontsCh) >= 4
-}
-
-func (f *fronted) frontSize() int {
-	f.frontsMu.RLock()
-	defer f.frontsMu.RUnlock()
-	return len(f.fronts)
-}
-
-func (f *fronted) frontAt(i int) Front {
-	f.frontsMu.RLock()
-	defer f.frontsMu.RUnlock()
-	return f.fronts[i]
 }
 
 func (f *fronted) vetFront(fr Front) bool {
@@ -571,7 +559,7 @@ func copyProviders(providers map[string]*Provider, countryCode string) map[strin
 	return providersCopy
 }
 
-func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sortedFronts {
+func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []Front {
 	log.Debugf("Loading candidates for %d providers", len(providers))
 	defer log.Debug("Finished loading candidates")
 
@@ -581,7 +569,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sor
 		size += len(p.Masquerades)
 	}
 
-	fronts := make(sortedFronts, size)
+	fronts := make([]Front, size)
 
 	// Note that map iteration order is random, so the order of the providers is automatically randomized.
 	index := 0
@@ -614,13 +602,6 @@ func (f *fronted) addProviders(providers map[string]*Provider) {
 	for key, p := range providers {
 		f.providers[key] = p
 	}
-}
-
-func (f *fronted) addFronts(fronts sortedFronts) {
-	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
-	f.frontsMu.Lock()
-	defer f.frontsMu.Unlock()
-	f.fronts = append(fronts, f.fronts.sortedCopy()...)
 }
 
 func (f *fronted) providerFor(m Front) *Provider {

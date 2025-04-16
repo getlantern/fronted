@@ -42,7 +42,7 @@ func (f *fronted) prepopulateFronts(cacheFile string) {
 	now := time.Now()
 
 	// update last succeeded status of masquerades based on cached values
-	for _, fr := range f.fronts {
+	for _, fr := range f.fronts.fronts {
 		for _, cf := range cachedFronts {
 			sameFront := cf.ProviderID == fr.getProviderID() && cf.Domain == fr.getDomain() && cf.IpAddress == fr.getIpAddress()
 			cachedValueFresh := now.Sub(fr.lastSucceeded()) < f.maxAllowedCachedAge

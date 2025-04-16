@@ -29,7 +29,7 @@ func TestCaching(t *testing.T) {
 	log.Debug("Creating fronted")
 	makeFronted := func() *fronted {
 		f := &fronted{
-			fronts:              make(sortedFronts, 0, 1000),
+			fronts:              newThreadSafeFronts(1000),
 			maxAllowedCachedAge: 250 * time.Millisecond,
 			maxCacheSize:        4,
 			cacheSaveInterval:   50 * time.Millisecond,
@@ -51,7 +51,7 @@ func TestCaching(t *testing.T) {
 	f := makeFronted()
 
 	log.Debug("Adding fronts")
-	f.fronts = append(f.fronts, mb, mc, md)
+	f.fronts.fronts = append(f.fronts.fronts, mb, mc, md)
 
 	readCached := func() []*front {
 		log.Debug("Reading cached fronts")

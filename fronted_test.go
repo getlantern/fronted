@@ -155,7 +155,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	// Check the number of masquerades at the end, waiting until we get the right number
 	masqueradesAtEnd := 0
 	for i := 0; i < 1000; i++ {
-		masqueradesAtEnd = len(d.fronts)
+		masqueradesAtEnd = len(d.fronts.fronts)
 		if masqueradesAtEnd == expectedMasqueradesAtEnd {
 			break
 		}
@@ -761,9 +761,10 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			}
 			f.providers = make(map[string]*Provider)
 			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, "")
-			f.fronts = make(sortedFronts, len(tt.masquerades))
+			//f.fronts = make(sortedFronts, len(tt.masquerades))
+			f.fronts = newThreadSafeFronts(len(tt.masquerades))
 			for i, m := range tt.masquerades {
-				f.fronts[i] = m
+				f.fronts.fronts[i] = m
 			}
 
 			f.tryAllFronts()
