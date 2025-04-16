@@ -377,32 +377,32 @@ func (m sortedFronts) Less(i, j int) bool {
 	}
 }
 
-func (m *sortedFronts) sortedCopy() sortedFronts {
-	c := make(sortedFronts, len(*m))
-	frontsMu.Lock()
-	defer frontsMu.Unlock()
-	copy(c, *m)
-	sort.Sort(c)
+func (m *sortedFronts) sortedCopy() []Front {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := make([]Front, len(m.fronts))
+	copy(c, m.fronts)
+	sort.Sort(sortedFronts{fronts: c})
 	return c
 }
 
-func (m *sortedFronts) addFronts(fronts sortedFronts) {
+func (m *sortedFronts) addFronts(fronts []Front) {
 	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
-	frontsMu.Lock()
-	defer frontsMu.Unlock()
-	*m = append(fronts, *m...)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fronts = append(fronts, m.fronts...)
 }
 
 func (m *sortedFronts) size() int {
-	frontsMu.Lock()
-	defer frontsMu.Unlock()
-	return len(*m)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.fronts)
 }
 
 func (m *sortedFronts) frontAt(i int) Front {
-	frontsMu.Lock()
-	defer frontsMu.Unlock()
-	return (*m)[i]
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.fronts[i]
 }
 
 func (fr *front) markCacheDirty() {
