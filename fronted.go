@@ -581,7 +581,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []F
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
 		sh := make([]*Masquerade, size)
-		for i := range size {
+		for i := 0; i < size; i++ {
 			j := rand.IntN(i + 1) // 0 <= j <= i
 			sh[i] = sh[j]
 			sh[j] = arr[i]
