@@ -320,7 +320,7 @@ func (f *fronted) tryAllFronts() {
 	pool := pond.NewPool(40)
 
 	// Submit all fronts to the worker pool.
-	for i := range f.fronts.frontSize() {
+	for i := 0; i < f.fronts.frontSize(); i++ {
 		m := f.fronts.frontAt(i)
 		pool.Submit(func() {
 			if f.isStopped() {
