@@ -49,7 +49,7 @@ var (
 // an implementation of http.RoundTripper for the convenience of callers.
 type fronted struct {
 	certPool            atomic.Value
-	fronts              sortedFronts
+	fronts              *sortedFronts
 	maxAllowedCachedAge time.Duration
 	maxCacheSize        int
 	cacheFile           string
@@ -102,7 +102,7 @@ func NewFronted(options ...Option) Fronted {
 
 	f := &fronted{
 		certPool:            atomic.Value{},
-		fronts:              make(sortedFronts, 0),
+		fronts:              newSortedFronts(1000),
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
 		cacheSaveInterval:   defaultCacheSaveInterval,
@@ -559,7 +559,7 @@ func copyProviders(providers map[string]*Provider, countryCode string) map[strin
 	return providersCopy
 }
 
-func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sortedFronts {
+func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) *sortedFronts {
 	log.Debugf("Loading candidates for %d providers", len(providers))
 	defer log.Debug("Finished loading candidates")
 
@@ -569,7 +569,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sor
 		size += len(p.Masquerades)
 	}
 
-	fronts := make(sortedFronts, size)
+	fronts := newSortedFronts(size)
 
 	// Note that map iteration order is random, so the order of the providers is automatically randomized.
 	index := 0
@@ -588,7 +588,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) sor
 		}
 
 		for _, c := range sh {
-			fronts[index] = newFront(c, key, cacheDirty)
+			fronts.fronts[index] = newFront(c, key, cacheDirty)
 			index++
 		}
 	}

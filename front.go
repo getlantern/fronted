@@ -360,20 +360,28 @@ func NewStatusCodeValidator(reject []int) ResponseValidator {
 	}
 }
 
-// slice of masquerade sorted by last vetted time
-type sortedFronts []Front
+// fronts sorted by last vetted time
+type sortedFronts struct {
+	fronts []Front
+	mu     sync.RWMutex
+}
 
-var frontsMu sync.RWMutex
+func newSortedFronts(size int) *sortedFronts {
+	return &sortedFronts{
+		fronts: make([]Front, size),
+		mu:     sync.RWMutex{},
+	}
+}
 
-func (m sortedFronts) Len() int      { return len(m) }
-func (m sortedFronts) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
-func (m sortedFronts) Less(i, j int) bool {
-	if m[i].lastSucceeded().After(m[j].lastSucceeded()) {
+func (m *sortedFronts) Len() int      { return len(m.fronts) }
+func (m *sortedFronts) Swap(i, j int) { m.fronts[i], m.fronts[j] = m.fronts[j], m.fronts[i] }
+func (m *sortedFronts) Less(i, j int) bool {
+	if m.fronts[i].lastSucceeded().After(m.fronts[j].lastSucceeded()) {
 		return true
-	} else if m[j].lastSucceeded().After(m[i].lastSucceeded()) {
+	} else if m.fronts[j].lastSucceeded().After(m.fronts[i].lastSucceeded()) {
 		return false
 	} else {
-		return m[i].getIpAddress() < m[j].getIpAddress()
+		return m.fronts[i].getIpAddress() < m.fronts[j].getIpAddress()
 	}
 }
 
@@ -382,26 +390,27 @@ func (m *sortedFronts) sortedCopy() []Front {
 	defer m.mu.Unlock()
 	c := make([]Front, len(m.fronts))
 	copy(c, m.fronts)
-	sort.Sort(sortedFronts{fronts: c})
+	sf := sortedFronts{fronts: c}
+	sort.Sort(&sf)
 	return c
 }
 
-func (m *sortedFronts) addFronts(fronts []Front) {
+func (m *sortedFronts) addFronts(fronts *sortedFronts) {
 	// Add new masquerades to the existing masquerades slice, but add them at the beginning.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.fronts = append(fronts, m.fronts...)
+	m.fronts = append(fronts.fronts, m.fronts...)
 }
 
 func (m *sortedFronts) size() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return len(m.fronts)
 }
 
 func (m *sortedFronts) frontAt(i int) Front {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.fronts[i]
 }
 

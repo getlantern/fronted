@@ -42,7 +42,7 @@ func (f *fronted) prepopulateFronts(cacheFile string) {
 	now := time.Now()
 
 	// update last succeeded status of masquerades based on cached values
-	for _, fr := range f.fronts {
+	for _, fr := range f.fronts.fronts {
 		for _, cf := range cachedFronts {
 			sameFront := cf.ProviderID == fr.getProviderID() && cf.Domain == fr.getDomain() && cf.IpAddress == fr.getIpAddress()
 			cachedValueFresh := now.Sub(fr.lastSucceeded()) < f.maxAllowedCachedAge
@@ -81,10 +81,7 @@ func (f *fronted) maintainCache(cacheFile string) {
 func (f *fronted) updateCache(cacheFile string) {
 	log.Debugf("Updating cache at %v", cacheFile)
 	cache := f.fronts.sortedCopy()
-	sizeToSave := len(cache)
-	if f.maxCacheSize < sizeToSave {
-		sizeToSave = f.maxCacheSize
-	}
+	sizeToSave := min(f.maxCacheSize, len(cache))
 	b, err := json.Marshal(cache[:sizeToSave])
 	if err != nil {
 		log.Errorf("Unable to marshal cache to JSON: %v", err)
