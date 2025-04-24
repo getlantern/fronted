@@ -114,7 +114,6 @@ func NewFronted(options ...Option) Fronted {
 		stopCh:            make(chan any, 10),
 		defaultProviderID: defaultFrontedProviderID,
 		httpClient:        http.DefaultClient,
-		cacheFile:         defaultCacheFilePath(),
 		configURL:         "",
 		frontsCh:          make(chan Front, 4000),
 		panicListener:     func(msg string) { log.Errorf("Panic in fronted: %v", msg) },
@@ -122,6 +121,9 @@ func NewFronted(options ...Option) Fronted {
 
 	for _, opt := range options {
 		opt(f)
+	}
+	if f.cacheFile == "" {
+		f.cacheFile = defaultCacheFilePath()
 	}
 
 	f.initCaching(f.cacheFile)
