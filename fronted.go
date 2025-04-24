@@ -124,6 +124,7 @@ func NewFronted(options ...Option) Fronted {
 		opt(f)
 	}
 
+	f.initCaching(f.cacheFile)
 	f.readFrontsFromEmbeddedConfig()
 	f.keepCurrent()
 
@@ -141,7 +142,7 @@ func WithHTTPClient(httpClient *http.Client) Option {
 // WithCacheFile sets the file to use for caching domains that have successfully connected.
 func WithCacheFile(file string) Option {
 	return func(f *fronted) {
-		f.initCaching(file)
+		f.cacheFile = file
 	}
 }
 
@@ -171,18 +172,18 @@ func defaultCacheFilePath() string {
 	if dir, err := os.UserConfigDir(); err != nil {
 		log.Errorf("Unable to get user config dir: %v", err)
 		// Use the temporary directory.
-		return mkdirall(os.TempDir(), "fronted_cache.json")
+		return mkdirall(os.TempDir(), "domainfronting", "fronted_cache.json")
 	} else {
-		return mkdirall(filepath.Join(dir, "domainfronting", "fronted_cache.json"))
+		return mkdirall(dir, "domainfronting", "fronted_cache.json")
 	}
 }
 
-func mkdirall(paths ...string) string {
-	path := filepath.Join(paths...)
+func mkdirall(base, path, fileName string) string {
+	path = filepath.Join(base, path)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		log.Errorf("Unable to create directory %v: %v", path, err)
 	}
-	return path
+	return filepath.Join(path, fileName)
 }
 
 // keepCurrent fetches the fronted configuration from the given URL and keeps it up
