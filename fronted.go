@@ -23,7 +23,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	tls "github.com/refraction-networking/utls"
-	"go.opentelemetry.io/otel"
 
 	"github.com/getlantern/golog"
 	"github.com/getlantern/keepcurrent"
@@ -42,7 +41,6 @@ const (
 var (
 	log                      = golog.LoggerFor("fronted")
 	defaultFrontedProviderID = "cloudfront"
-	tracer                   = otel.Tracer("fronted")
 )
 
 // fronted identifies working IP address/domain pairings for domain fronting and is
@@ -378,9 +376,7 @@ func (f *fronted) vetFront(fr Front) bool {
 }
 
 func (f *fronted) NewConnectedRoundTripper(ctx context.Context, addr string) (http.RoundTripper, error) {
-	ctx, span := tracer.Start(ctx, "NewConnectedRoundTripper")
-	defer span.End()
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

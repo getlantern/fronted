@@ -16,7 +16,6 @@ require (
 	github.com/goccy/go-yaml v1.15.13
 	github.com/refraction-networking/utls v1.6.7
 	github.com/stretchr/testify v1.10.0
-	go.opentelemetry.io/otel v1.19.0
 )
 
 require (
@@ -47,6 +46,7 @@ require (
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/ulikunitz/xz v0.5.10 // indirect
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
+	go.opentelemetry.io/otel v1.19.0 // indirect
 	go.opentelemetry.io/otel/metric v1.19.0 // indirect
 	go.opentelemetry.io/otel/trace v1.19.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
