@@ -1,8 +1,8 @@
 module github.com/getlantern/fronted
 
-go 1.22.4
+go 1.24
 
-toolchain go1.22.8
+toolchain go1.24.1
 
 require (
 	github.com/alitto/pond/v2 v2.1.5
@@ -14,13 +14,13 @@ require (
 	github.com/getlantern/tlsdialer/v3 v3.0.3
 	github.com/getlantern/waitforserver v1.0.1
 	github.com/goccy/go-yaml v1.15.13
-	github.com/refraction-networking/utls v1.6.7
+	github.com/refraction-networking/utls v1.7.1
 	github.com/stretchr/testify v1.10.0
 )
 
 require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/cloudflare/circl v1.3.7 // indirect
+	github.com/cloudflare/circl v1.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dsnet/compress v0.0.2-0.20210315054119-f66993602bf5 // indirect
 	github.com/getlantern/byteexec v0.0.0-20170405023437-4cfb26ec74f4 // indirect
@@ -51,7 +51,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.19.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
-	golang.org/x/sys v0.27.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
