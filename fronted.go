@@ -108,7 +108,7 @@ func NewFronted(options ...Option) Fronted {
 		cacheClosed:         make(chan any),
 		providers:           make(map[string]*Provider),
 		// We can and should update this as new ClientHellos become available in utls.
-		clientHelloID:     tls.HelloRandomized,
+		clientHelloID:     tls.HelloChrome_131,
 		stopCh:            make(chan any, 10),
 		defaultProviderID: defaultFrontedProviderID,
 		httpClient:        http.DefaultClient,
