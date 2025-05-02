@@ -299,7 +299,7 @@ func (f *fronted) findWorkingFronts() {
 			// to try, for example.
 			time.Sleep(1 * time.Second)
 		} else {
-			log.Debug("findWorkingFronts::Enough working fronts...sleeping")
+			log.Trace("findWorkingFronts::Enough working fronts...sleeping")
 			select {
 			case <-f.stopCh:
 				log.Debug("findWorkingFronts::Stopping parallel dialing")
