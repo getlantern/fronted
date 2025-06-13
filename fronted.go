@@ -318,10 +318,10 @@ func (f *fronted) onConnected(fr Front) {
 
 func (f *fronted) tryAllFronts() {
 	// Find working fronts using a worker pool of goroutines.
-	pool := pond.NewPool(40)
+	pool := pond.NewPool(10)
 
 	// Submit all fronts to the worker pool.
-	for i := 0; i < f.fronts.frontSize(); i++ {
+	for i := range f.fronts.frontSize() {
 		m := f.fronts.frontAt(i)
 		pool.Submit(func() {
 			if f.isStopped() {
@@ -346,7 +346,7 @@ func (f *fronted) tryAllFronts() {
 }
 
 func (f *fronted) hasEnoughWorkingFronts() bool {
-	return len(f.frontsCh) >= 4
+	return len(f.frontsCh) >= 2
 }
 
 func (f *fronted) vetFront(fr Front) bool {
