@@ -66,9 +66,7 @@ func TestYamlParsing(t *testing.T) {
 }
 
 func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
-	dir, err := os.MkdirTemp("", "direct_test")
-	require.NoError(t, err, "Unable to create temp dir")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.2")
 
 	t.Log("Testing direct domain fronting without SNI config")
@@ -83,9 +81,7 @@ func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
 }
 
 func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
-	dir, err := os.MkdirTemp("", "direct_test")
-	require.NoError(t, err, "Unable to create temp dir")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.3")
 
 	getURL := "https://config.example.com/global.yaml.gz"
@@ -178,7 +174,6 @@ func TestVet(t *testing.T) {
 }
 
 func TestHostAliasesBasic(t *testing.T) {
-
 	headersIn := map[string][]string{
 		"X-Foo-Bar": {"Quux", "Baz"},
 		"X-Bar-Foo": {"XYZ"},
@@ -300,12 +295,10 @@ func TestHostAliasesBasic(t *testing.T) {
 		resp, err := client.Get(test.url)
 		assert.EqualError(t, err, test.expectedError)
 		assert.Nil(t, resp)
-
 	}
 }
 
 func TestHostAliasesMulti(t *testing.T) {
-
 	tests := []struct {
 		url            string
 		expectedStatus int
@@ -556,7 +549,7 @@ func newCDN(t *testing.T, providerID, domain string) (*httptest.Server, string, 
 		logf = func(format string, args ...any) {}
 	}
 
-	allowedSuffix := fmt.Sprintf(".%s", domain)
+	allowedSuffix := "." + domain
 	srv := httptest.NewTLSServer(
 		http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			dump, err := httputil.DumpRequest(req, true)
@@ -766,8 +759,8 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, "")
 			//f.fronts = make(sortedFronts, len(tt.masquerades))
 			f.fronts = newThreadSafeFronts(len(tt.masquerades))
-			for i, m := range tt.masquerades {
-				f.fronts.fronts[i] = m
+			for _, m := range tt.masquerades {
+				f.fronts.fronts = append(f.fronts.fronts, m)
 			}
 
 			f.tryAllFronts()

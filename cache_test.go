@@ -7,16 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCaching(t *testing.T) {
-	dir, err := os.MkdirTemp("", "direct_test")
-	if !assert.NoError(t, err, "Unable to create temp dir") {
-		return
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.1")
 
 	cloudsackID := "cloudsack"
