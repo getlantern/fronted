@@ -633,6 +633,8 @@ func (f *fronted) providerFor(m Front) *Provider {
 	if pid == "" {
 		pid = f.defaultProviderID
 	}
+	f.providersMu.RLock()
+	defer f.providersMu.RUnlock()
 	return f.providers[pid]
 }
 
