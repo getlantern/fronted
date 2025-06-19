@@ -45,7 +45,7 @@ func trustedCACerts(t *testing.T) *x509.CertPool {
 	}
 	pool, err := keyman.PoolContainingCerts(certs...)
 	if err != nil {
-		log.Errorf("Could not create pool %v", err)
+		log.Error("Could not create pool", "error", err)
 		t.Fatalf("Unable to set up cert pool")
 	}
 	return pool

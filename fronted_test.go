@@ -71,12 +71,14 @@ func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
 	defer os.RemoveAll(dir)
 	cacheFile := filepath.Join(dir, "cachefile.2")
 
-	log.Debug("Testing direct domain fronting without SNI config")
+	t.Log("Testing direct domain fronting without SNI config")
 	doTestDomainFronting(t, cacheFile, 10)
 	time.Sleep(defaultCacheSaveInterval * 2)
 	// Then try again, this time reusing the existing cacheFile but a corrupted version
-	corruptMasquerades(cacheFile)
-	log.Debug("Testing direct domain fronting without SNI config again")
+	n, err := corruptMasquerades(cacheFile)
+	require.NoError(t, err, "Unable to corrupt masquerades")
+	t.Logf("Corrupted %d masquerades", n)
+	t.Log("Testing direct domain fronting without SNI config again")
 	doTestDomainFronting(t, cacheFile, 10)
 }
 
@@ -241,7 +243,7 @@ func TestHostAliasesBasic(t *testing.T) {
 		},
 	}
 
-	cloudSack, cloudSackAddr, err := newCDN("cloudsack", "cloudsack.biz")
+	cloudSack, cloudSackAddr, err := newCDN(t, "cloudsack", "cloudsack.biz")
 	if !assert.NoError(t, err, "failed to start cloudsack cdn") {
 		return
 	}
@@ -333,13 +335,13 @@ func TestHostAliasesMulti(t *testing.T) {
 		},
 	}
 
-	sadCloud, sadCloudAddr, err := newCDN("sadcloud", "sadcloud.io")
+	sadCloud, sadCloudAddr, err := newCDN(t, "sadcloud", "sadcloud.io")
 	if !assert.NoError(t, err, "failed to start sadcloud cdn") {
 		return
 	}
 	defer sadCloud.Close()
 
-	cloudSack, cloudSackAddr, err := newCDN("cloudsack", "cloudsack.biz")
+	cloudSack, cloudSackAddr, err := newCDN(t, "cloudsack", "cloudsack.biz")
 	if !assert.NoError(t, err, "failed to start cloudsack cdn") {
 		return
 	}
@@ -478,7 +480,7 @@ func TestPassthrough(t *testing.T) {
 		},
 	}
 
-	cloudSack, cloudSackAddr, err := newCDN("cloudsack", "cloudsack.biz")
+	cloudSack, cloudSackAddr, err := newCDN(t, "cloudsack", "cloudsack.biz")
 	if !assert.NoError(t, err, "failed to start cloudsack cdn") {
 		return
 	}
@@ -547,22 +549,28 @@ type CDNResult struct {
 	Headers                     map[string][]string
 }
 
-func newCDN(providerID, domain string) (*httptest.Server, string, error) {
+func newCDN(t *testing.T, providerID, domain string) (*httptest.Server, string, error) {
+	var logf = t.Logf
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		// don't log request dumps in CI
+		logf = func(format string, args ...any) {}
+	}
+
 	allowedSuffix := fmt.Sprintf(".%s", domain)
 	srv := httptest.NewTLSServer(
 		http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			dump, err := httputil.DumpRequest(req, true)
 			if err != nil {
-				log.Errorf("Failed to dump request: %s", err)
+				logf("Failed to dump request: %s", err)
 			} else {
-				log.Debugf("(%s) CDN Request: %s", domain, dump)
+				logf("(%s) CDN Request: %s", domain, dump)
 			}
 
 			forceFail := req.Header.Get(CDNForceFail)
 
 			vhost := req.Host
 			if vhost == domain || strings.HasSuffix(vhost, allowedSuffix) && forceFail == "" {
-				log.Debugf("accepting request host=%s ff=%s", vhost, forceFail)
+				logf("accepting request host=%s ff=%s", vhost, forceFail)
 				body, _ := json.Marshal(&CDNResult{
 					Host:     vhost,
 					Path:     req.URL.Path,
@@ -573,55 +581,50 @@ func newCDN(providerID, domain string) (*httptest.Server, string, error) {
 				rw.WriteHeader(http.StatusAccepted)
 				rw.Write(body)
 			} else {
-				log.Debugf("(%s) Rejecting request with host = %q ff=%s allowed=%s", domain, vhost, forceFail, allowedSuffix)
+				logf("(%s) Rejecting request with host = %q ff=%s allowed=%s", domain, vhost, forceFail, allowedSuffix)
 				errorCode := http.StatusForbidden
 				if forceFail != "" {
 					errorCode, err = strconv.Atoi(forceFail)
 					if err != nil {
 						errorCode = http.StatusInternalServerError
 					}
-					log.Debugf("Forcing status code to %d", errorCode)
+					logf("Forcing status code to %d", errorCode)
 				}
 				rw.WriteHeader(errorCode)
 			}
 		}))
 	addr := srv.Listener.Addr().String()
-	log.Debugf("Waiting for origin server at %s...", addr)
+	logf("Waiting for origin server at %s...", addr)
 	if err := WaitForServer("tcp", addr, 10*time.Second); err != nil {
 		return nil, "", err
 	}
-	log.Debugf("Started %s CDN", domain)
+	logf("Started %s CDN", domain)
 	return srv, addr, nil
 }
 
-func corruptMasquerades(cacheFile string) {
-	log.Debug("Corrupting masquerades")
+func corruptMasquerades(cacheFile string) (int, error) {
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
-		log.Error(err)
-		return
+		return 0, err
 	}
 	masquerades := make([]map[string]interface{}, 0)
 	err = json.Unmarshal(data, &masquerades)
 	if err != nil {
-		log.Error(err)
-		return
+		return 0, err
 	}
-	log.Debugf("Number of masquerades to corrupt: %d", len(masquerades))
 	for _, masquerade := range masquerades {
-		domain := masquerade["Domain"]
 		ip := masquerade["IpAddress"]
 		ipParts := strings.Split(ip.(string), ".")
 		part0, _ := strconv.Atoi(ipParts[0])
 		ipParts[0] = strconv.Itoa(part0 + 1)
 		masquerade["IpAddress"] = strings.Join(ipParts, ".")
-		log.Debugf("Corrupted masquerade %v", domain)
 	}
 	messedUp, err := json.Marshal(masquerades)
 	if err != nil {
-		return
+		return 0, err
 	}
-	os.WriteFile(cacheFile, messedUp, 0644)
+
+	return len(masquerades), os.WriteFile(cacheFile, messedUp, 0644)
 }
 
 func TestVerifyPeerCertificate(t *testing.T) {
