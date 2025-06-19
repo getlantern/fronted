@@ -170,7 +170,7 @@ func WithPanicListener(panicListener func(string)) Option {
 
 // SetLogger sets the logger to use by fronted.
 func SetLogger(logger *slog.Logger) {
-	log = logger.With(slog.String("module", "fronted"))
+	log = logger
 }
 
 func (f *fronted) paniced(msg string, r any, stack []byte) {
