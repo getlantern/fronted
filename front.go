@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -158,7 +157,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	resp, err := client.Do(req)
 	if err != nil {
 		op.FailIf(err)
-		log.Debugf("Unsuccessful vetting with %v request, discarding masquerade: %v", method, err)
+		log.Debug("Error vetting masquerade", "error", err, "method", method, "url", u)
 		return false
 	}
 	if resp.Body != nil {
@@ -168,9 +167,9 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	if resp.StatusCode != expectedStatus {
 		op.Set("response_status", resp.StatusCode)
 		op.Set("expected_status", expectedStatus)
-		msg := fmt.Sprintf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
-		op.FailIf(errors.New(msg))
-		log.Debug(msg)
+		err := fmt.Errorf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
+		op.FailIf(err)
+		log.Debug("Unexpected response status vetting masquerade", "expected", expectedStatus, "statusCode", resp.StatusCode, "status", resp.Status)
 		return false
 	}
 	return true

@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -24,7 +26,6 @@ import (
 	"github.com/goccy/go-yaml"
 	tls "github.com/refraction-networking/utls"
 
-	"github.com/getlantern/golog"
 	"github.com/getlantern/keepcurrent"
 	"github.com/getlantern/ops"
 
@@ -39,7 +40,7 @@ const (
 )
 
 var (
-	log                      = golog.LoggerFor("fronted")
+	log                      = slog.Default().With(slog.String("module", "fronted"))
 	defaultFrontedProviderID = "cloudfront"
 )
 
@@ -114,7 +115,6 @@ func NewFronted(options ...Option) Fronted {
 		httpClient:        http.DefaultClient,
 		configURL:         "",
 		frontsCh:          make(chan Front, 4000),
-		panicListener:     func(msg string) { log.Errorf("Panic in fronted: %v", msg) },
 	}
 
 	for _, opt := range options {
@@ -168,10 +168,32 @@ func WithPanicListener(panicListener func(string)) Option {
 	}
 }
 
+// SetLogger sets the logger to use by fronted.
+func SetLogger(logger *slog.Logger) {
+	log = logger
+}
+
+func (f *fronted) paniced(msg string, r any, stack []byte) {
+	var pcs [1]uintptr
+	// skip [runtime.Callers, this function]
+	runtime.Callers(2, pcs[:])
+	fs := runtime.CallersFrames(pcs[:])
+	fr, _ := fs.Next()
+
+	log.Error(
+		msg,
+		slog.Any("panic(r)", r),
+		slog.String("function", fr.Function),
+		slog.String("stack", string(stack)),
+	)
+	if f.panicListener != nil {
+		f.panicListener(fmt.Sprintf("%s. panic(r)=%v", msg, r))
+	}
+}
+
 func defaultCacheFilePath() string {
 	if dir, err := os.UserConfigDir(); err != nil {
-		log.Errorf("Unable to get user config dir: %v", err)
-		// Use the temporary directory.
+		log.Warn("Unable to get user config dir", "error", err)
 		return mkdirall(os.TempDir(), "domainfronting", "fronted_cache.json")
 	} else {
 		return mkdirall(dir, "domainfronting", "fronted_cache.json")
@@ -181,7 +203,7 @@ func defaultCacheFilePath() string {
 func mkdirall(base, path, fileName string) string {
 	path = filepath.Join(base, path)
 	if err := os.MkdirAll(path, 0o700); err != nil {
-		log.Errorf("Unable to create directory %v: %v", path, err)
+		log.Warn("Unable to create directory for fronted cache", "path", path, "error", err)
 	}
 	return filepath.Join(path, fileName)
 }
@@ -194,7 +216,7 @@ func (f *fronted) keepCurrent() {
 		return
 	}
 
-	log.Debugf("Updating fronted configuration from URL %v", f.configURL)
+	log.Debug("Updating fronted configuration", "url", f.configURL)
 	source := keepcurrent.FromWebWithClient(f.configURL, f.httpClient)
 	chDB := make(chan []byte)
 	dest := keepcurrent.ToChannel(chDB)
@@ -209,7 +231,7 @@ func (f *fronted) keepCurrent() {
 		// Recover from panics and log them
 		defer func() {
 			if r := recover(); r != nil {
-				f.panicListener(fmt.Sprintf("Panic waiting for fronts %v with stack: %v", r, debug.Stack()))
+				f.paniced("PANIC waiting for fronts", r, debug.Stack())
 			}
 		}()
 		for data := range chDB {
@@ -225,6 +247,7 @@ func (f *fronted) validator() func([]byte) error {
 	return func(data []byte) error {
 		_, _, err := processYaml(data)
 		if err != nil {
+			log.Error("Failed to validate fronted configuration", "error", err)
 			return err
 		}
 		return nil
@@ -234,7 +257,7 @@ func (f *fronted) validator() func([]byte) error {
 func (f *fronted) readFrontsFromEmbeddedConfig() {
 	yml, err := embedFS.ReadFile("fronted.yaml.gz")
 	if err != nil {
-		log.Debugf("Failed to read smart dialer config %v", err)
+		log.Debug("Failed to read smart dialer config", "error", err)
 		return
 	}
 	f.onNewFrontsConfig(yml)
@@ -243,7 +266,7 @@ func (f *fronted) readFrontsFromEmbeddedConfig() {
 func (f *fronted) onNewFrontsConfig(gzippedYaml []byte) {
 	pool, providers, err := processYaml(gzippedYaml)
 	if err != nil {
-		log.Errorf("Failed to process fronted config: %v", err)
+		log.Error("Failed to process fronted config", "error", err)
 		return
 	}
 	f.onNewFronts(pool, providers)
@@ -256,12 +279,17 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	// caller side.
 	log.Debug("Updating fronted configuration")
 	if len(providers) == 0 {
-		log.Errorf("No providers configured")
+		log.Error("No providers configured")
 		return
 	}
 	providersCopy := copyProviders(providers, f.countryCode)
 	f.addProviders(providersCopy)
-	f.fronts.addFronts(loadFronts(providersCopy, f.cacheDirty)...)
+
+	log.Debug("Loading candidates for providers", "numProviders", len(providersCopy))
+	fronts := loadFronts(providersCopy, f.cacheDirty)
+	log.Debug("Finished loading candidates")
+
+	f.fronts.addFronts(fronts...)
 	f.certPool.Store(pool)
 
 	// The goroutine for finding working fronts runs forever, so only start it once.
@@ -269,7 +297,7 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					f.panicListener(fmt.Sprintf("Panic finding working fronts %v with stack: %v", r, debug.Stack()))
+					f.paniced("PANIC finding working fronts", r, debug.Stack())
 				}
 			}()
 			f.findWorkingFronts()
@@ -299,7 +327,7 @@ func (f *fronted) findWorkingFronts() {
 			// to try, for example.
 			time.Sleep(1 * time.Second)
 		} else {
-			log.Trace("findWorkingFronts::Enough working fronts...sleeping")
+			log.Debug("findWorkingFronts::Enough working fronts...sleeping")
 			select {
 			case <-f.stopCh:
 				log.Debug("findWorkingFronts::Stopping parallel dialing")
@@ -352,7 +380,7 @@ func (f *fronted) hasEnoughWorkingFronts() bool {
 func (f *fronted) vetFront(fr Front) bool {
 	conn, err := f.dialFront(fr)
 	if err != nil {
-		log.Debugf("unexpected error vetting masquerades: %v", err)
+		log.Debug("unexpected error vetting masquerades", "error", err)
 		return false
 	}
 	defer func() {
@@ -363,12 +391,12 @@ func (f *fronted) vetFront(fr Front) bool {
 
 	provider := f.providerFor(fr)
 	if provider == nil {
-		log.Debugf("Skipping masquerade with disabled/unknown provider id '%s' not in %v",
-			fr.getProviderID(), f.providers)
+		log.Debug("Skipping masquerade with disabled/unknown provider",
+			slog.String("providerID", fr.getProviderID()), slog.Any("providers", f.providers))
 		return false
 	}
 	if !fr.markWithResult(fr.verifyWithPost(conn, provider.TestURL)) {
-		log.Debugf("Unsuccessful vetting with POST request, discarding masquerade")
+		log.Debug("Unsuccessful vetting with POST request, discarding masquerade")
 		return false
 	}
 
@@ -391,14 +419,14 @@ func (f *fronted) NewConnectedRoundTripper(ctx context.Context, addr string) (ht
 			}
 			provider := f.providerFor(fr)
 			if provider == nil {
-				log.Debugf("Skipping masquerade with disabled/unknown provider '%s'", fr.getProviderID())
+				log.Debug("Skipping masquerade with disabled/unknown provider", "providerID", fr.getProviderID())
 				fr.markWithResult(false)
 				continue
 			}
 
 			conn, err := f.dialFront(fr)
 			if err != nil {
-				log.Debugf("Could not dial to %v: %v", fr, err)
+				log.Debug("failed to dial masquerade", slog.Any("masquerade", fr), slog.String("error", err.Error()))
 				fr.markWithResult(false)
 				continue
 			}
@@ -413,7 +441,7 @@ func (f *fronted) NewConnectedRoundTripper(ctx context.Context, addr string) (ht
 }
 
 func (f *fronted) dialFront(fr Front) (net.Conn, error) {
-	log.Tracef("Dialing to %v", fr)
+	log.Debug("Dialing front", slog.Any("front", fr))
 
 	// We do the full TLS connection here because in practice the domains at a given IP
 	// address can change frequently on CDNs, so the certificate may not match what
@@ -422,7 +450,7 @@ func (f *fronted) dialFront(fr Front) (net.Conn, error) {
 	if err == nil {
 		return conn, err
 	} else if !retriable {
-		log.Debugf("Dropping masquerade: non retryable error: %v", err)
+		log.Debug("Dropping masquerade: not retriable", "error", err)
 		fr.markWithResult(false)
 	}
 	return conn, err
@@ -451,15 +479,15 @@ func (f *fronted) doDial(fr Front) (net.Conn, bool, error) {
 		if !isNetworkUnreachable(err) {
 			op.FailIf(err)
 		}
-		log.Debugf("Could not dial to %v, %v", fr.getIpAddress(), err)
+		log.Debug("failed to dial address", slog.String("address", fr.getIpAddress()), slog.String("error", err.Error()))
 		// Don't re-add this candidate if it's any certificate error, as that
 		// will just keep failing and will waste connections. We can't access the underlying
 		// error at this point so just look for "certificate" and "handshake".
 		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "handshake") {
-			log.Debugf("Not re-adding candidate that failed on error '%v'", err.Error())
+			log.Debug("Not re-adding candidate", "error", err, "masquerade", fr)
 			retriable = false
 		} else {
-			log.Debugf("Unexpected error dialing, keeping masquerade: %v", err)
+			log.Debug("Unexpected error dialing, keeping masquerade", "error", err, "masquerade", fr)
 			retriable = true
 		}
 	}
@@ -559,9 +587,6 @@ func copyProviders(providers map[string]*Provider, countryCode string) map[strin
 }
 
 func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []Front {
-	log.Debugf("Loading candidates for %d providers", len(providers))
-	defer log.Debug("Finished loading candidates")
-
 	// Preallocate the slice to avoid reallocation
 	size := 0
 	for _, p := range providers {
@@ -608,6 +633,8 @@ func (f *fronted) providerFor(m Front) *Provider {
 	if pid == "" {
 		pid = f.defaultProviderID
 	}
+	f.providersMu.RLock()
+	defer f.providersMu.RUnlock()
 	return f.providers[pid]
 }
 
@@ -618,7 +645,6 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 		certPool:            atomic.Value{},
 		maxAllowedCachedAge: defaultMaxAllowedCachedAge,
 		maxCacheSize:        defaultMaxCacheSize,
-		panicListener:       func(msg string) { log.Errorf("Panic in fronted: %v", msg) },
 	}
 	d.certPool.Store(pool)
 	masq := &front{Masquerade: *m}
@@ -633,36 +659,30 @@ func Vet(m *Masquerade, pool *x509.CertPool, testURL string) bool {
 func processYaml(gzippedYaml []byte) (*x509.CertPool, map[string]*Provider, error) {
 	r, gzipErr := gzip.NewReader(bytes.NewReader(gzippedYaml))
 	if gzipErr != nil {
-		log.Errorf("Failed to create gzip reader %v", gzipErr)
 		// Wrap the error
 		return nil, nil, fmt.Errorf("failed to create gzip reader: %w", gzipErr)
 	}
 	yml, err := io.ReadAll(r)
 	if err != nil {
-		log.Errorf("Failed to read gzipped file %v", err)
 		return nil, nil, fmt.Errorf("failed to read gzipped file: %w", err)
 	}
 	path, err := yaml.PathString("$.providers")
 	if err != nil {
-		log.Errorf("Failed to create providers path %v", err)
 		return nil, nil, fmt.Errorf("failed to create providers path: %w", err)
 	}
 	providers := make(map[string]*Provider)
 	pathErr := path.Read(bytes.NewReader(yml), &providers)
 	if pathErr != nil {
-		log.Errorf("Failed to read providers %v", pathErr)
 		return nil, nil, fmt.Errorf("failed to read providers: %w", pathErr)
 	}
 
 	trustedCAsPath, err := yaml.PathString("$.trustedcas")
 	if err != nil {
-		log.Errorf("Failed to create trusted CA path %v", err)
 		return nil, nil, fmt.Errorf("failed to create trusted CA path: %w", err)
 	}
 	var trustedCAs []*CA
 	trustedCAsErr := trustedCAsPath.Read(bytes.NewReader(yml), &trustedCAs)
 	if trustedCAsErr != nil {
-		log.Errorf("Failed to read trusted CAs %v", trustedCAsErr)
 		return nil, nil, fmt.Errorf("failed to read trusted CAs: %w", trustedCAsErr)
 	}
 	pool := x509.NewCertPool()

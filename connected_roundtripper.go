@@ -42,11 +42,12 @@ func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 		op.FailIf(err)
 		return nil, err
 	}
-	log.Debugf("Translated origin %s -> %s for provider %s...", originHost, frontedHost, crt.front.getProviderID())
+	log.Debug("Host translated from origin to fronted", "origin", originHost, "fronted", frontedHost, "provider", crt.front.getProviderID())
 
 	reqi, err := withDomainFront(req, frontedHost, req.Body)
 	if err != nil {
-		return nil, op.FailIf(log.Errorf("Failed to copy http request with origin translated to %v?: %v", frontedHost, err))
+		log.Debug("Could not copy request with domain front", "error", err, "origin", originHost, "frontedHost", frontedHost, "provider", crt.front.getProviderID())
+		return nil, op.FailIf(fmt.Errorf("Failed to copy http request with origin translated to %v?: %w", frontedHost, err))
 	}
 	disableKeepAlives := true
 	if strings.EqualFold(reqi.Header.Get("Connection"), "upgrade") {
@@ -56,14 +57,14 @@ func (crt connectedRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	tr := connectedConnHTTPTransport(crt.Conn, disableKeepAlives)
 	resp, err := tr.RoundTrip(reqi)
 	if err != nil {
-		log.Debugf("Could not complete request: %v", err)
+		log.Debug("Could not complete request", "error", err, "origin", originHost, "frontedHost", frontedHost, "provider", crt.front.getProviderID())
 		crt.front.markWithResult(false)
 		return nil, err
 	}
 
 	err = crt.provider.ValidateResponse(resp)
 	if err != nil {
-		log.Debugf("Response did not validate for origin %s -> %s for provider %s with error: %v", originHost, frontedHost, crt.front.getProviderID(), err)
+		log.Debug("Response validation failed", "error", err, "origin", originHost, "frontedHost", frontedHost, "provider", crt.front.getProviderID())
 		resp.Body.Close()
 		crt.front.markWithResult(false)
 		return nil, err
