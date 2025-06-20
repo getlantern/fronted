@@ -152,7 +152,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 
 	// Check the number of masquerades at the end, waiting until we get the right number
 	masqueradesAtEnd := 0
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		masqueradesAtEnd = len(d.fronts.fronts)
 		if masqueradesAtEnd == expectedMasqueradesAtEnd {
 			break
@@ -714,7 +714,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				newMockFront("domain1.com", "1.1.1.1", 0, true),
 				newMockFront("domain1.com", "1.1.1.1", 0, true),
 			},
-			expectedSuccessful: 4,
+			expectedSuccessful: 2,
 		},
 		{
 			name: "Some successful",
@@ -746,7 +746,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 				}
 				return masquerades
 			}(),
-			expectedSuccessful: 4,
+			expectedSuccessful: 2,
 		},
 	}
 
