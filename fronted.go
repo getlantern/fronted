@@ -608,7 +608,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []F
 
 	// Note that map iteration order is random, so the order of the providers is automatically randomized.
 	index := 0
-	for providerId, p := range providers {
+	for providerID, p := range providers {
 		arr := p.Masquerades
 		size := len(arr)
 
@@ -623,7 +623,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []F
 		}
 
 		for _, c := range sh {
-			fronts[index] = newFront(c, providerId, cacheDirty)
+			fronts[index] = newFront(c, providerID, cacheDirty)
 			index++
 		}
 	}
