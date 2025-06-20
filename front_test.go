@@ -129,3 +129,23 @@ func TestGenerateSNI(t *testing.T) {
 		})
 	}
 }
+
+func TestNewThreadSafeFronts(t *testing.T) {
+	// Test with size 0
+	tsf := newThreadSafeFronts(0)
+	assert.NotNil(t, tsf)
+	assert.Equal(t, 0, tsf.frontSize())
+	assert.NotNil(t, tsf.fronts)
+	assert.Equal(t, 0, cap(tsf.fronts))
+
+	// Test with positive size
+	size := 5
+	tsf2 := newThreadSafeFronts(size)
+	assert.NotNil(t, tsf2)
+	assert.Equal(t, 0, tsf2.frontSize())
+	assert.NotNil(t, tsf2.fronts)
+	assert.Equal(t, size, cap(tsf2.fronts))
+
+	// Test that mutex is initialized
+	assert.NotNil(t, &tsf2.mx)
+}

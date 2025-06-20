@@ -699,13 +699,13 @@ func TestVerifyPeerCertificate(t *testing.T) {
 func TestFindWorkingMasquerades(t *testing.T) {
 	tests := []struct {
 		name                string
-		masquerades         []*mockFront
+		masquerades         []Front
 		expectedSuccessful  int
 		expectedMasquerades int
 	}{
 		{
 			name: "All successful",
-			masquerades: []*mockFront{
+			masquerades: []Front{
 				newMockFront("domain1.com", "1.1.1.1", 0, true),
 				newMockFront("domain2.com", "2.2.2.2", 0, true),
 				newMockFront("domain3.com", "3.3.3.3", 0, true),
@@ -717,7 +717,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 		},
 		{
 			name: "Some successful",
-			masquerades: []*mockFront{
+			masquerades: []Front{
 				newMockFront("domain1.com", "1.1.1.1", 0, true),
 				newMockFront("domain2.com", "2.2.2.2", 0, false),
 				newMockFront("domain3.com", "3.3.3.3", 0, true),
@@ -728,7 +728,7 @@ func TestFindWorkingMasquerades(t *testing.T) {
 		},
 		{
 			name: "None successful",
-			masquerades: []*mockFront{
+			masquerades: []Front{
 				newMockFront("domain1.com", "1.1.1.1", 0, false),
 				newMockFront("domain2.com", "2.2.2.2", 0, false),
 				newMockFront("domain3.com", "3.3.3.3", 0, false),
@@ -738,8 +738,8 @@ func TestFindWorkingMasquerades(t *testing.T) {
 		},
 		{
 			name: "Batch processing",
-			masquerades: func() []*mockFront {
-				var masquerades []*mockFront
+			masquerades: func() []Front {
+				var masquerades []Front
 				for i := 0; i < 50; i++ {
 					masquerades = append(masquerades, newMockFront(fmt.Sprintf("domain%d.com", i), fmt.Sprintf("1.1.1.%d", i), 0, i%2 == 0))
 				}
@@ -757,11 +757,8 @@ func TestFindWorkingMasquerades(t *testing.T) {
 			}
 			f.providers = make(map[string]*Provider)
 			f.providers["testProviderId"] = NewProvider(nil, "", nil, nil, nil, nil, "")
-			//f.fronts = make(sortedFronts, len(tt.masquerades))
 			f.fronts = newThreadSafeFronts(len(tt.masquerades))
-			for _, m := range tt.masquerades {
-				f.fronts.fronts = append(f.fronts.fronts, m)
-			}
+			f.fronts.addFronts(tt.masquerades...)
 
 			f.tryAllFronts()
 
