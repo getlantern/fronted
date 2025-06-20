@@ -65,7 +65,7 @@ func TestYamlParsing(t *testing.T) {
 	assert.Greater(t, len(providers), 0)
 }
 
-func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
+func TestDomainFrontingWithoutSNIConfig(t *testing.T) {
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.2")
 
@@ -80,7 +80,7 @@ func TestDirectDomainFrontingWithoutSNIConfig(t *testing.T) {
 	doTestDomainFronting(t, cacheFile, 10)
 }
 
-func TestDirectDomainFrontingWithSNIConfig(t *testing.T) {
+func TestDomainFrontingWithSNIConfig(t *testing.T) {
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.3")
 
@@ -130,7 +130,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
-	transport := NewFronted(WithCacheFile(cacheFile))
+	transport := NewFronted(WithCacheFile(cacheFile), WithEmbeddedConfigName("noconfig.yaml"))
 	transport.onNewFronts(certs, p)
 
 	rt := newTransportFromDialer(transport)
@@ -141,7 +141,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
 	defaultFrontedProviderID = testProviderID
-	transport = NewFronted(WithCacheFile(cacheFile))
+	transport = NewFronted(WithCacheFile(cacheFile), WithEmbeddedConfigName("noconfig.yaml"))
 	transport.onNewFronts(certs, p)
 	client = &http.Client{
 		Transport: newTransportFromDialer(transport),
