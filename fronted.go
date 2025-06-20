@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -60,16 +61,17 @@ type fronted struct {
 	providers           map[string]*Provider
 	clientHelloID       tls.ClientHelloID
 
-	providersMu   sync.RWMutex
-	frontsMu      sync.RWMutex
-	stopCh        chan interface{}
-	crawlOnce     sync.Once
-	stopped       atomic.Bool
-	countryCode   string
-	httpClient    *http.Client
-	configURL     string
-	frontsCh      chan Front
-	panicListener func(string)
+	providersMu        sync.RWMutex
+	frontsMu           sync.RWMutex
+	stopCh             chan interface{}
+	crawlOnce          sync.Once
+	stopped            atomic.Bool
+	countryCode        string
+	httpClient         *http.Client
+	configURL          string
+	frontsCh           chan Front
+	panicListener      func(string)
+	embeddedConfigName string
 }
 
 // Interface for sending HTTP traffic over domain fronting.
@@ -109,12 +111,13 @@ func NewFronted(options ...Option) Fronted {
 		cacheClosed:         make(chan any),
 		providers:           make(map[string]*Provider),
 		// We can and should update this as new ClientHellos become available in utls.
-		clientHelloID:     tls.HelloChrome_131,
-		stopCh:            make(chan any, 10),
-		defaultProviderID: defaultFrontedProviderID,
-		httpClient:        http.DefaultClient,
-		configURL:         "",
-		frontsCh:          make(chan Front, 4000),
+		clientHelloID:      tls.HelloChrome_131,
+		stopCh:             make(chan any, 10),
+		defaultProviderID:  defaultFrontedProviderID,
+		httpClient:         http.DefaultClient,
+		configURL:          "",
+		frontsCh:           make(chan Front, 4000),
+		embeddedConfigName: "fronted.yaml.gz",
 	}
 
 	for _, opt := range options {
@@ -129,6 +132,13 @@ func NewFronted(options ...Option) Fronted {
 	f.keepCurrent()
 
 	return f
+}
+
+// Allows tests to override the embedded configuration name.
+func WithEmbeddedConfigName(name string) Option {
+	return func(f *fronted) {
+		f.embeddedConfigName = name
+	}
 }
 
 // WithHTTPClient sets the HTTP client to use for fetching the fronted configuration. For example, the client
@@ -255,9 +265,9 @@ func (f *fronted) validator() func([]byte) error {
 }
 
 func (f *fronted) readFrontsFromEmbeddedConfig() {
-	yml, err := embedFS.ReadFile("fronted.yaml.gz")
+	yml, err := embedFS.ReadFile(f.embeddedConfigName)
 	if err != nil {
-		log.Debug("Failed to read smart dialer config", "error", err)
+		log.Info("Failed to read embedded config", "error", err)
 		return
 	}
 	f.onNewFrontsConfig(yml)
@@ -277,7 +287,7 @@ func (f *fronted) onNewFrontsConfig(gzippedYaml []byte) {
 func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provider) {
 	// Make copies just to avoid any concurrency issues with access that may be happening on the
 	// caller side.
-	log.Debug("Updating fronted configuration")
+	log.Debug("Updating fronted configuration", "numProviders", len(providers))
 	if len(providers) == 0 {
 		log.Error("No providers configured")
 		return
@@ -289,6 +299,7 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	fronts := loadFronts(providersCopy, f.cacheDirty)
 	log.Debug("Finished loading candidates")
 
+	log.Debug("Existing fronts", slog.Int("size", f.fronts.frontSize()))
 	f.fronts.addFronts(fronts...)
 	f.certPool.Store(pool)
 
@@ -597,7 +608,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []F
 
 	// Note that map iteration order is random, so the order of the providers is automatically randomized.
 	index := 0
-	for key, p := range providers {
+	for providerID, p := range providers {
 		arr := p.Masquerades
 		size := len(arr)
 
@@ -605,14 +616,14 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []F
 		// make a shuffled copy of arr
 		// ('inside-out' Fisher-Yates)
 		sh := make([]*Masquerade, size)
-		for i := 0; i < size; i++ {
+		for i := range size {
 			j := rand.IntN(i + 1) // 0 <= j <= i
 			sh[i] = sh[j]
 			sh[j] = arr[i]
 		}
 
 		for _, c := range sh {
-			fronts[index] = newFront(c, key, cacheDirty)
+			fronts[index] = newFront(c, providerID, cacheDirty)
 			index++
 		}
 	}
@@ -623,14 +634,13 @@ func (f *fronted) addProviders(providers map[string]*Provider) {
 	// Add new providers to the existing providers map, overwriting any existing ones.
 	f.providersMu.Lock()
 	defer f.providersMu.Unlock()
-	for key, p := range providers {
-		f.providers[key] = p
-	}
+	maps.Copy(f.providers, providers)
 }
 
-func (f *fronted) providerFor(m Front) *Provider {
-	pid := m.getProviderID()
+func (f *fronted) providerFor(fr Front) *Provider {
+	pid := fr.getProviderID()
 	if pid == "" {
+		log.Info("No provider ID for masquerade, using default", slog.String("defaultProviderID", f.defaultProviderID))
 		pid = f.defaultProviderID
 	}
 	f.providersMu.RLock()

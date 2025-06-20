@@ -157,7 +157,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 	resp, err := client.Do(req)
 	if err != nil {
 		op.FailIf(err)
-		log.Debug("Error vetting masquerade", "error", err, "method", method, "url", u)
+		log.Info("Error vetting masquerade", "error", err, "method", method, "url", u)
 		return false
 	}
 	if resp.Body != nil {
@@ -169,7 +169,7 @@ func doCheck(client *http.Client, method string, expectedStatus int, u string) b
 		op.Set("expected_status", expectedStatus)
 		err := fmt.Errorf("Unexpected response status vetting masquerade, expected %d got %d: %v", expectedStatus, resp.StatusCode, resp.Status)
 		op.FailIf(err)
-		log.Debug("Unexpected response status vetting masquerade", "expected", expectedStatus, "statusCode", resp.StatusCode, "status", resp.Status)
+		log.Info("Unexpected response status vetting masquerade", "expected", expectedStatus, "statusCode", resp.StatusCode, "status", resp.Status)
 		return false
 	}
 	return true
