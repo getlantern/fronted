@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getlantern/netx"
 	"github.com/getlantern/ops"
 	"github.com/getlantern/tlsdialer/v3"
 	tls "github.com/refraction-networking/utls"
@@ -119,7 +118,7 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 		}
 	}
 	dialer := &tlsdialer.Dialer{
-		DoDial:         netx.DialTimeout,
+		DoDial:         dialWithTimeout,
 		Timeout:        dialTimeout,
 		SendServerName: sendServerNameExtension,
 		Config:         tlsConfig,
@@ -131,6 +130,11 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 		addr = net.JoinHostPort(addr, "443")
 	}
 	return dialer.Dial("tcp", addr)
+}
+
+func dialWithTimeout(network string, addr string, timeout time.Duration) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: timeout}
+	return dialer.Dial(network, addr)
 }
 
 // verifyWithPost does a post with invalid data to verify domain-fronting works
