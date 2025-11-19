@@ -3,8 +3,6 @@ package fronted
 import (
 	"crypto/x509"
 	"testing"
-
-	"github.com/getlantern/keyman"
 )
 
 var (
@@ -43,11 +41,14 @@ func trustedCACerts(t *testing.T) *x509.CertPool {
 	for _, ca := range DefaultTrustedCAs {
 		certs = append(certs, ca.Cert)
 	}
-	pool, err := keyman.PoolContainingCerts(certs...)
-	if err != nil {
-		log.Error("Could not create pool", "error", err)
-		t.Fatalf("Unable to set up cert pool")
+	pool := x509.NewCertPool()
+	for _, cert := range certs {
+		if ok := pool.AppendCertsFromPEM([]byte(cert)); !ok {
+			log.Error("Could not append to pool")
+			t.Fatalf("Unable to set up cert pool")
+		}
 	}
+
 	return pool
 }
 
