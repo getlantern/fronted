@@ -1,6 +1,7 @@
 package fronted
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
@@ -87,14 +88,16 @@ type front struct {
 	ProviderID string
 	mx         sync.RWMutex
 	cacheDirty chan interface{}
+	dialFunc   func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-func newFront(m *Masquerade, providerID string, cacheDirty chan interface{}) Front {
+func newFront(m *Masquerade, providerID string, cacheDirty chan interface{}, dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)) Front {
 	return &front{
 		Masquerade:    *m,
 		ProviderID:    providerID,
 		LastSucceeded: time.Time{},
 		cacheDirty:    cacheDirty,
+		dialFunc:      dialFunc,
 	}
 }
 func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (net.Conn, error) {
@@ -117,8 +120,20 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 			return verifyPeerCertificate(rawCerts, rootCAs, verifyHostname)
 		}
 	}
+
+	var doDial func(network, addr string, timeout time.Duration) (net.Conn, error)
+	if fr.dialFunc != nil {
+		doDial = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			return fr.dialFunc(ctx, network, addr)
+		}
+	} else {
+		doDial = dialWithTimeout
+	}
+
 	dialer := &tlsdialer.Dialer{
-		DoDial:         dialWithTimeout,
+		DoDial:         doDial,
 		Timeout:        dialTimeout,
 		SendServerName: sendServerNameExtension,
 		Config:         tlsConfig,

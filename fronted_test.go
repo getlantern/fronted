@@ -799,7 +799,7 @@ func TestLoadFronts(t *testing.T) {
 
 	// Create the cache dirty channel
 	cacheDirty := make(chan interface{}, 10)
-	masquerades := loadFronts(providers, cacheDirty)
+	masquerades := loadFronts(providers, cacheDirty, nil)
 
 	assert.Equal(t, 4, len(masquerades), "Unexpected number of masquerades loaded")
 

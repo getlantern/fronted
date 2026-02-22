@@ -48,6 +48,7 @@ var (
 // fronted identifies working IP address/domain pairings for domain fronting and is
 // an implementation of http.RoundTripper for the convenience of callers.
 type fronted struct {
+	dialFunc            func(ctx context.Context, network, addr string) (net.Conn, error)
 	certPool            atomic.Value
 	fronts              *threadSafeFronts
 	maxAllowedCachedAge time.Duration
@@ -123,6 +124,9 @@ func NewFronted(options ...Option) Fronted {
 	for _, opt := range options {
 		opt(f)
 	}
+	if f.dialFunc == nil {
+		f.dialFunc = (&net.Dialer{}).DialContext
+	}
 	if f.cacheFile == "" {
 		f.cacheFile = defaultCacheFilePath()
 	}
@@ -175,6 +179,14 @@ func WithConfigURL(configURL string) Option {
 func WithPanicListener(panicListener func(string)) Option {
 	return func(f *fronted) {
 		f.panicListener = panicListener
+	}
+}
+
+// WithDialer sets a custom dialer function for the fronted instance. This allows callers to
+// inject their own dialer for making TCP connections to fronting domains.
+func WithDialer(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
+	return func(f *fronted) {
+		f.dialFunc = dial
 	}
 }
 
@@ -296,7 +308,7 @@ func (f *fronted) onNewFronts(pool *x509.CertPool, providers map[string]*Provide
 	f.addProviders(providersCopy)
 
 	log.Debug("Loading candidates for providers", "numProviders", len(providersCopy))
-	fronts := loadFronts(providersCopy, f.cacheDirty)
+	fronts := loadFronts(providersCopy, f.cacheDirty, f.dialFunc)
 	log.Debug("Finished loading candidates")
 
 	log.Debug("Existing fronts", slog.Int("size", f.fronts.frontSize()))
@@ -596,7 +608,7 @@ func copyProviders(providers map[string]*Provider, countryCode string) map[strin
 	return providersCopy
 }
 
-func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []Front {
+func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}, dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)) []Front {
 	// Preallocate the slice to avoid reallocation
 	size := 0
 	for _, p := range providers {
@@ -622,7 +634,7 @@ func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}) []F
 		}
 
 		for _, c := range sh {
-			fronts[index] = newFront(c, providerID, cacheDirty)
+			fronts[index] = newFront(c, providerID, cacheDirty, dialFunc)
 			index++
 		}
 	}
