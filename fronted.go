@@ -45,10 +45,13 @@ var (
 	defaultFrontedProviderID = "cloudfront"
 )
 
+// DialFunc is the function type used for dialing network connections.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
 // fronted identifies working IP address/domain pairings for domain fronting and is
 // an implementation of http.RoundTripper for the convenience of callers.
 type fronted struct {
-	dialFunc            func(ctx context.Context, network, addr string) (net.Conn, error)
+	dialFunc            DialFunc
 	certPool            atomic.Value
 	fronts              *threadSafeFronts
 	maxAllowedCachedAge time.Duration
@@ -183,8 +186,10 @@ func WithPanicListener(panicListener func(string)) Option {
 }
 
 // WithDialer sets a custom dialer function for the fronted instance. This allows callers to
-// inject their own dialer for making TCP connections to fronting domains.
-func WithDialer(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
+// inject their own dialer for making the underlying TCP connections. The dialer will typically
+// be invoked with an IP:port destination (derived from the configured fronting infrastructure),
+// while the fronting domain name (SNI/ServerName) is configured separately via the TLS settings.
+func WithDialer(dial DialFunc) Option {
 	return func(f *fronted) {
 		f.dialFunc = dial
 	}
@@ -608,7 +613,7 @@ func copyProviders(providers map[string]*Provider, countryCode string) map[strin
 	return providersCopy
 }
 
-func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}, dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)) []Front {
+func loadFronts(providers map[string]*Provider, cacheDirty chan interface{}, dialFunc DialFunc) []Front {
 	// Preallocate the slice to avoid reallocation
 	size := 0
 	for _, p := range providers {

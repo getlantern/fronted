@@ -926,3 +926,62 @@ func (m *mockFront) markWithResult(good bool) bool {
 
 // Make sure that the mockMasquerade implements the MasqueradeInterface
 var _ Front = (*mockFront)(nil)
+
+func TestWithDialer(t *testing.T) {
+	called := false
+	customDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		called = true
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
+	}
+
+	f := NewFronted(
+		WithDialer(customDialer),
+		WithEmbeddedConfigName("noconfig.yaml"),
+	)
+	defer f.Close()
+
+	d := f.(*fronted)
+	assert.NotNil(t, d.dialFunc, "dialFunc should be set")
+
+	// Verify the custom dialer is stored (we can't compare funcs directly, but we can
+	// verify it's not the default by calling it and checking our flag).
+	_, _ = d.dialFunc(context.Background(), "tcp", "localhost:0")
+	assert.True(t, called, "custom dialer should have been called")
+}
+
+func TestWithDialerDefault(t *testing.T) {
+	f := NewFronted(WithEmbeddedConfigName("noconfig.yaml"))
+	defer f.Close()
+
+	d := f.(*fronted)
+	assert.NotNil(t, d.dialFunc, "default dialFunc should be set when WithDialer is not used")
+}
+
+func TestWithDialerFlowsToFronts(t *testing.T) {
+	called := false
+	customDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		called = true
+		return nil, errors.New("custom dialer called")
+	}
+
+	f := NewFronted(
+		WithDialer(customDialer),
+		WithEmbeddedConfigName("noconfig.yaml"),
+	)
+	defer f.Close()
+
+	d := f.(*fronted)
+
+	// Create a provider and fronts using the fronted's dialer
+	masquerades := []*Masquerade{{Domain: "example.com", IpAddress: "127.0.0.1"}}
+	providers := map[string]*Provider{
+		"test": NewProvider(nil, "", masquerades, nil, nil, nil, ""),
+	}
+	fronts := loadFronts(providers, d.cacheDirty, d.dialFunc)
+	assert.Equal(t, 1, len(fronts))
+
+	// Dialing through the front should use the custom dialer
+	_, err := fronts[0].dial(nil, tls.HelloChrome_131)
+	assert.Error(t, err)
+	assert.True(t, called, "custom dialer should flow through to fronts")
+}

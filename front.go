@@ -88,10 +88,10 @@ type front struct {
 	ProviderID string
 	mx         sync.RWMutex
 	cacheDirty chan interface{}
-	dialFunc   func(ctx context.Context, network, addr string) (net.Conn, error)
+	dialFunc   DialFunc
 }
 
-func newFront(m *Masquerade, providerID string, cacheDirty chan interface{}, dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)) Front {
+func newFront(m *Masquerade, providerID string, cacheDirty chan interface{}, dialFunc DialFunc) Front {
 	return &front{
 		Masquerade:    *m,
 		ProviderID:    providerID,
