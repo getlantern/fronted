@@ -93,7 +93,7 @@ func TestDomainFrontingWithSNIConfig(t *testing.T) {
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
 	defaultFrontedProviderID = "akamai"
-	transport := NewFronted(WithCacheFile(cacheFile), WithCountryCode("test"))
+	transport := NewFronted(WithCacheFile(cacheFile), WithCountryCode("test"), WithEmbeddedConfigName("noconfig.yaml"))
 	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
