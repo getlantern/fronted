@@ -66,6 +66,9 @@ func TestYamlParsing(t *testing.T) {
 }
 
 func TestDomainFrontingWithoutSNIConfig(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping integration test in CI: requires real CDN endpoints")
+	}
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.2")
 
@@ -81,6 +84,9 @@ func TestDomainFrontingWithoutSNIConfig(t *testing.T) {
 }
 
 func TestDomainFrontingWithSNIConfig(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping integration test in CI: requires real CDN endpoints")
+	}
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.3")
 
@@ -164,6 +170,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 }
 
 func TestVet(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping integration test in CI: requires real CDN endpoints")
+	}
 	pool := trustedCACerts(t)
 	for _, m := range testMasquerades {
 		if Vet(m, pool, pingTestURL) {
