@@ -77,6 +77,9 @@ func TestDomainFrontingWithoutSNIConfig(t *testing.T) {
 }
 
 func TestDomainFrontingWithSNIConfig(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping Akamai integration test in CI: real Akamai endpoints are unreliable from CI runners")
+	}
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.3")
 
