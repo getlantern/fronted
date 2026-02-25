@@ -163,6 +163,9 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 }
 
 func TestVet(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping integration test in CI: vets masquerades sequentially against real CDN endpoints")
+	}
 	pool := trustedCACerts(t)
 	for _, m := range testMasquerades {
 		if Vet(m, pool, pingTestURL) {
