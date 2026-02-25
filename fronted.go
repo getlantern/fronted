@@ -375,16 +375,17 @@ func (f *fronted) tryAllFronts() {
 	// Find working fronts using a worker pool of goroutines.
 	pool := pond.NewPool(10)
 
-	// Submit all fronts to the worker pool.
-	for i := range f.fronts.frontSize() {
-		m := f.fronts.frontAt(i)
+	// Get a snapshot and shuffle it so fronts from different sources
+	// (embedded config, cache, manually added) are interleaved.
+	// This avoids exhausting a block of stale fronts before reaching working ones.
+	fronts := f.fronts.shuffledCopy()
+
+	for _, m := range fronts {
 		pool.Submit(func() {
 			if f.isStopped() {
 				return
 			}
 			if f.hasEnoughWorkingFronts() {
-				// We have enough working fronts, so no need to continue.
-				// log.Debug("Enough working fronts...ignoring task")
 				return
 			}
 			working := f.vetFront(m)
