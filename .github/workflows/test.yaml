@@ -35,9 +35,3 @@ jobs:
       if: always()
     - name: Publish Test Summary Results
       run: npx github-actions-ctrf ctrf-report.json
-    - name: Install goveralls
-      run: go install github.com/mattn/goveralls@latest
-    - name: Send coverage
-      env:
-        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: goveralls -coverprofile=profile.cov -service=github
