@@ -50,10 +50,6 @@ func TestConfigUpdating(t *testing.T) {
 }
 
 func TestYamlParsing(t *testing.T) {
-	// Disable this if we're running in CI because the file is using git lfs and will just be a pointer.
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		t.Skip("Skipping test in GitHub Actions because the file is using git lfs and will be a pointer")
-	}
 	yamlFile, err := os.ReadFile("fronted.yaml.gz")
 	require.NoError(t, err)
 	pool, providers, err := processYaml(yamlFile)
@@ -66,9 +62,6 @@ func TestYamlParsing(t *testing.T) {
 }
 
 func TestDomainFrontingWithoutSNIConfig(t *testing.T) {
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		t.Skip("Skipping integration test in CI: requires real CDN endpoints")
-	}
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.2")
 
@@ -84,9 +77,6 @@ func TestDomainFrontingWithoutSNIConfig(t *testing.T) {
 }
 
 func TestDomainFrontingWithSNIConfig(t *testing.T) {
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		t.Skip("Skipping integration test in CI: requires real CDN endpoints")
-	}
 	dir := t.TempDir()
 	cacheFile := filepath.Join(dir, "cachefile.3")
 
@@ -136,7 +126,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
 	defaultFrontedProviderID = testProviderID
-	transport := NewFronted(WithCacheFile(cacheFile), WithEmbeddedConfigName("noconfig.yaml"))
+	transport := NewFronted(WithCacheFile(cacheFile))
 	transport.onNewFronts(certs, p)
 
 	rt := newTransportFromDialer(transport)
@@ -147,7 +137,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
 	defaultFrontedProviderID = testProviderID
-	transport = NewFronted(WithCacheFile(cacheFile), WithEmbeddedConfigName("noconfig.yaml"))
+	transport = NewFronted(WithCacheFile(cacheFile))
 	transport.onNewFronts(certs, p)
 	client = &http.Client{
 		Transport: newTransportFromDialer(transport),
@@ -160,7 +150,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	masqueradesAtEnd := 0
 	for range 1000 {
 		masqueradesAtEnd = len(d.fronts.fronts)
-		if masqueradesAtEnd == expectedMasqueradesAtEnd {
+		if masqueradesAtEnd >= expectedMasqueradesAtEnd {
 			break
 		}
 		time.Sleep(30 * time.Millisecond)
@@ -170,9 +160,6 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 }
 
 func TestVet(t *testing.T) {
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		t.Skip("Skipping integration test in CI: requires real CDN endpoints")
-	}
 	pool := trustedCACerts(t)
 	for _, m := range testMasquerades {
 		if Vet(m, pool, pingTestURL) {

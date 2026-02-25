@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"sort"
@@ -396,6 +397,15 @@ func (tsf *threadSafeFronts) sortedCopy() sortedFronts {
 	c := make(sortedFronts, len(tsf.fronts))
 	copy(c, tsf.fronts)
 	sort.Sort(c)
+	return c
+}
+
+func (tsf *threadSafeFronts) shuffledCopy() []Front {
+	tsf.mx.RLock()
+	defer tsf.mx.RUnlock()
+	c := make([]Front, len(tsf.fronts))
+	copy(c, tsf.fronts)
+	rand.Shuffle(len(c), func(i, j int) { c[i], c[j] = c[j], c[i] })
 	return c
 }
 
