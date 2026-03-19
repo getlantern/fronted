@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/getlantern/ops"
-	"github.com/getlantern/tlsdialer/v3"
 	tls "github.com/refraction-networking/utls"
 )
 
@@ -133,19 +132,51 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 		doDial = dialWithTimeout
 	}
 
-	dialer := &tlsdialer.Dialer{
-		DoDial:         doDial,
-		Timeout:        dialTimeout,
-		SendServerName: sendServerNameExtension,
-		Config:         tlsConfig,
-		ClientHelloID:  clientHelloID,
-	}
 	_, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		// If there is no port, we default to 443
 		addr = net.JoinHostPort(addr, "443")
 	}
-	return dialer.Dial("tcp", addr)
+
+	deadline := time.Now().Add(dialTimeout)
+
+	rawConn, err := doDial("tcp", addr, dialTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	configCopy := tlsConfig.Clone()
+	configCopy.InsecureSkipVerify = true
+	if !sendServerNameExtension {
+		configCopy.ServerName = ""
+	}
+
+	chid := clientHelloID
+	if chid.Client == "" {
+		chid = tls.HelloGolang
+	}
+
+	conn := tls.UClient(rawConn, configCopy, chid)
+	rawConn.SetDeadline(deadline)
+	if err := conn.Handshake(); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	rawConn.SetDeadline(time.Time{})
+
+	if !tlsConfig.InsecureSkipVerify {
+		state := conn.ConnectionState()
+		rawCerts := make([][]byte, len(state.PeerCertificates))
+		for i, cert := range state.PeerCertificates {
+			rawCerts[i] = cert.Raw
+		}
+		if err := verifyPeerCertificate(rawCerts, tlsConfig.RootCAs, tlsConfig.ServerName); err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+	}
+
+	return conn, nil
 }
 
 func dialWithTimeout(network string, addr string, timeout time.Duration) (net.Conn, error) {
