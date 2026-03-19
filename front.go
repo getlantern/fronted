@@ -165,38 +165,23 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 	rawConn.SetDeadline(time.Time{})
 
 	if !tlsConfig.InsecureSkipVerify {
-		if _, err := verifyServerCerts(conn, tlsConfig.ServerName, tlsConfig.RootCAs); err != nil {
+		state := conn.ConnectionState()
+		rawCerts := make([][]byte, len(state.PeerCertificates))
+		for i, cert := range state.PeerCertificates {
+			rawCerts[i] = cert.Raw
+		}
+		if err := verifyPeerCertificate(rawCerts, tlsConfig.RootCAs, tlsConfig.ServerName); err != nil {
 			rawConn.Close()
 			return nil, err
 		}
 	}
 
-	return conn.Conn, nil
+	return conn, nil
 }
 
 func dialWithTimeout(network string, addr string, timeout time.Duration) (net.Conn, error) {
 	dialer := net.Dialer{Timeout: timeout}
 	return dialer.Dial(network, addr)
-}
-
-func verifyServerCerts(conn *tls.UConn, serverName string, rootCAs *x509.CertPool) ([][]*x509.Certificate, error) {
-	certs := conn.ConnectionState().PeerCertificates
-	if len(certs) == 0 {
-		return nil, fmt.Errorf("no peer certificates provided")
-	}
-	opts := x509.VerifyOptions{
-		Roots:         rootCAs,
-		CurrentTime:   time.Now(),
-		DNSName:       serverName,
-		Intermediates: x509.NewCertPool(),
-	}
-	for i, cert := range certs {
-		if i == 0 {
-			continue
-		}
-		opts.Intermediates.AddCert(cert)
-	}
-	return certs[0].Verify(opts)
 }
 
 // verifyWithPost does a post with invalid data to verify domain-fronting works
