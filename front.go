@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/getlantern/ops"
-	"github.com/getlantern/tlsdialer/v3"
 	tls "github.com/refraction-networking/utls"
 )
 
@@ -133,24 +132,71 @@ func (fr *front) dial(rootCAs *x509.CertPool, clientHelloID tls.ClientHelloID) (
 		doDial = dialWithTimeout
 	}
 
-	dialer := &tlsdialer.Dialer{
-		DoDial:         doDial,
-		Timeout:        dialTimeout,
-		SendServerName: sendServerNameExtension,
-		Config:         tlsConfig,
-		ClientHelloID:  clientHelloID,
-	}
 	_, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		// If there is no port, we default to 443
 		addr = net.JoinHostPort(addr, "443")
 	}
-	return dialer.Dial("tcp", addr)
+
+	deadline := time.Now().Add(dialTimeout)
+
+	rawConn, err := doDial("tcp", addr, dialTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	configCopy := tlsConfig.Clone()
+	configCopy.InsecureSkipVerify = true
+	if !sendServerNameExtension {
+		configCopy.ServerName = ""
+	}
+
+	chid := clientHelloID
+	if chid.Client == "" {
+		chid = tls.HelloGolang
+	}
+
+	conn := tls.UClient(rawConn, configCopy, chid)
+	rawConn.SetDeadline(deadline)
+	if err := conn.Handshake(); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	rawConn.SetDeadline(time.Time{})
+
+	if !tlsConfig.InsecureSkipVerify {
+		if _, err := verifyServerCerts(conn, tlsConfig.ServerName, tlsConfig.RootCAs); err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+	}
+
+	return conn.Conn, nil
 }
 
 func dialWithTimeout(network string, addr string, timeout time.Duration) (net.Conn, error) {
 	dialer := net.Dialer{Timeout: timeout}
 	return dialer.Dial(network, addr)
+}
+
+func verifyServerCerts(conn *tls.UConn, serverName string, rootCAs *x509.CertPool) ([][]*x509.Certificate, error) {
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("no peer certificates provided")
+	}
+	opts := x509.VerifyOptions{
+		Roots:         rootCAs,
+		CurrentTime:   time.Now(),
+		DNSName:       serverName,
+		Intermediates: x509.NewCertPool(),
+	}
+	for i, cert := range certs {
+		if i == 0 {
+			continue
+		}
+		opts.Intermediates.AddCert(cert)
+	}
+	return certs[0].Verify(opts)
 }
 
 // verifyWithPost does a post with invalid data to verify domain-fronting works
