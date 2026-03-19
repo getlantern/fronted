@@ -171,6 +171,14 @@ func WithCountryCode(cc string) Option {
 	}
 }
 
+// WithDefaultProviderID sets the default provider ID used when a front has no
+// provider (e.g. from a cache file). Defaults to "cloudfront".
+func WithDefaultProviderID(id string) Option {
+	return func(f *fronted) {
+		f.defaultProviderID = id
+	}
+}
+
 // WithConfigURL sets the URL from which to continually fetch updated domain fronting configurations.
 func WithConfigURL(configURL string) Option {
 	return func(f *fronted) {

@@ -95,8 +95,7 @@ func TestDomainFrontingWithSNIConfig(t *testing.T) {
 		UseArbitrarySNIs: true,
 		ArbitrarySNIs:    []string{"mercadopago.com", "amazon.com.br", "facebook.com", "google.com", "twitter.com", "youtube.com", "instagram.com", "linkedin.com", "whatsapp.com", "netflix.com", "microsoft.com", "yahoo.com", "bing.com", "wikipedia.org", "github.com"},
 	})
-	defaultFrontedProviderID = "akamai"
-	transport := NewFronted(WithCacheFile(cacheFile), WithCountryCode("test"), WithEmbeddedConfigName("noconfig.yaml"))
+	transport := NewFronted(WithCacheFile(cacheFile), WithCountryCode("test"), WithEmbeddedConfigName("noconfig.yaml"), WithDefaultProviderID("akamai"))
 	transport.onNewFronts(certs, p)
 
 	client := &http.Client{
@@ -109,6 +108,7 @@ func newTransportFromDialer(f Fronted) http.RoundTripper {
 	rt, _ := f.NewConnectedRoundTripper(context.Background(), "")
 	return rt
 }
+
 
 func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtEnd int) int {
 	getURL := "https://config.example.com/global.yaml.gz"
@@ -128,8 +128,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	defaultFrontedProviderID = testProviderID
-	transport := NewFronted(WithCacheFile(cacheFile))
+	transport := NewFronted(WithCacheFile(cacheFile), WithDefaultProviderID(testProviderID))
 	transport.onNewFronts(certs, p)
 
 	rt := newTransportFromDialer(transport)
@@ -139,8 +138,7 @@ func doTestDomainFronting(t *testing.T, cacheFile string, expectedMasqueradesAtE
 	}
 	require.True(t, doCheck(client, http.MethodPost, http.StatusAccepted, pingURL))
 
-	defaultFrontedProviderID = testProviderID
-	transport = NewFronted(WithCacheFile(cacheFile))
+	transport = NewFronted(WithCacheFile(cacheFile), WithDefaultProviderID(testProviderID))
 	transport.onNewFronts(certs, p)
 	client = &http.Client{
 		Transport: newTransportFromDialer(transport),
@@ -256,8 +254,7 @@ func TestHostAliasesBasic(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted()
+	rt := NewFronted(WithDefaultProviderID("cloudsack"))
 
 	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 	for _, test := range tests {
@@ -365,8 +362,7 @@ func TestHostAliasesMulti(t *testing.T) {
 		"sadcloud":  p2,
 	}
 
-	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted()
+	rt := NewFronted(WithDefaultProviderID("cloudsack"))
 	rt.onNewFronts(certs, providers)
 
 	providerCounts := make(map[string]int)
@@ -489,8 +485,7 @@ func TestPassthrough(t *testing.T) {
 	certs := x509.NewCertPool()
 	certs.AddCert(cloudSack.Certificate())
 
-	defaultFrontedProviderID = "cloudsack"
-	rt := NewFronted()
+	rt := NewFronted(WithDefaultProviderID("cloudsack"))
 	rt.onNewFronts(certs, map[string]*Provider{"cloudsack": p})
 
 	for _, test := range tests {

@@ -21,8 +21,7 @@ func ConfigureForTest(t *testing.T) Fronted {
 func ConfigureCachingForTest(t *testing.T, cacheFile string) Fronted {
 	certs := trustedCACerts(t)
 	p := testProviders()
-	defaultFrontedProviderID = testProviderID
-	f := NewFronted(WithCacheFile(cacheFile))
+	f := NewFronted(WithCacheFile(cacheFile), WithDefaultProviderID(testProviderID))
 	f.onNewFronts(certs, p)
 	return f
 }
@@ -30,8 +29,7 @@ func ConfigureCachingForTest(t *testing.T, cacheFile string) Fronted {
 func ConfigureHostAlaisesForTest(t *testing.T, hosts map[string]string) Fronted {
 	certs := trustedCACerts(t)
 	p := testProvidersWithHosts(hosts)
-	defaultFrontedProviderID = testProviderID
-	f := NewFronted()
+	f := NewFronted(WithDefaultProviderID(testProviderID))
 	f.onNewFronts(certs, p)
 	return f
 }
@@ -59,9 +57,13 @@ func testProviders() map[string]*Provider {
 }
 
 func testProvidersWithHosts(hosts map[string]string) map[string]*Provider {
-	return map[string]*Provider{
+	p := map[string]*Provider{
 		testProviderID: NewProvider(hosts, pingTestURL, testMasquerades, nil, nil, nil, ""),
 	}
+	// Also register the test hosts with the akamai provider so that akamai fronts
+	// loaded from the embedded config don't cause "no domain fronting mapping" errors.
+	p["akamai"] = NewProvider(hosts, pingTestURL, nil, nil, nil, nil, "")
+	return p
 }
 func testAkamaiProvidersWithHosts(hosts map[string]string, sniConfig *SNIConfig) map[string]*Provider {
 	frontingSNIs := map[string]*SNIConfig{
